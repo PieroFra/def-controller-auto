@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "ctrl_def"
-version = "0.1.0"
+version = "0.1.1"
 name = "DEF Controller Auto"
 tagline = "Generazione automatica di controller per bone DEF"
 maintainer = "Pierfrancesco Diodato"
@@ -22,14 +22,22 @@ tags = [
 ]
 
 description = """
-Genera automaticamente controller (bone CTRL_) a partire da bone con prefisso DEF_.
+Genera automaticamente controller a partire da bone con prefisso DEF_.
 
 Caratteristiche:
+- Naming pulito di default senza prefisso (DEF_hand.L -> hand.L, standard
+  Blender/Rigify) o con prefisso personalizzabile (es. CTRL_).
 - Creazione bone controller in Edit Mode con orientamento e roll identici.
+- Gerarchia di default 'Catena CTRL (FK)': ricrea l'albero FK tra i controller
+  con use_deform = False e zero Dependency Cycle con A.C.T.D.
+- Pulsante 1-click 'Vincola DEF ai CTRL (ACTD)' (ctrl_def.bind_actd): configura
+  ed esegue automaticamente A.C.T.D. se presente, altrimenti applica constraint
+  COPY_TRANSFORMS nativi dal registro proprietario.
 - Assegnazione automatica di custom shape geometriche (Cerchio, Cubo, Sfera, Freccia, Croce).
 - Supporto a colori palette tema Blender (Rosso, Verde, Blu).
 - Raggruppamento automatico nella Bone Collection 'CTRL'.
-- Scelta della gerarchia di parentela (DEF stesso, Bone genitore, Root).
+- Scelta della gerarchia di parentela (Catena CTRL FK, Bone genitore, Root,
+  Nessuno, DEF stesso).
 - Mirroring automatico delle coppie simmetriche (.L / .R).
 - Tracciamento nel registro JSON sull'armatura e rimozione pulita in un click.
 - Preset veloci integrati (Default, Arto Bipede, Root Controller, Faccia).

@@ -1,7 +1,7 @@
 bl_info = {
     "name": "DEF Controller Auto",
     "author": "",
-    "version": (0, 1, 0),
+    "version": (0, 1, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > DEF Ctrl",
     "description": "Genera controller per bone DEF, tracciati e rimovibili",
@@ -219,8 +219,10 @@ def _create_shape_object(shape, radius, col):
 class CTRLDEF_PG_settings(PropertyGroup):
     prefix_def: StringProperty(
         name=tr("panel.prefix_def"), default="DEF_")
+    # Default vuoto = nome pulito senza prefisso (standard Blender/Rigify):
+    # DEF_hand.L -> hand.L. Con "CTRL_" si ottiene CTRL_hand.L.
     prefix_ctrl: StringProperty(
-        name=tr("panel.prefix_ctrl"), default="CTRL_")
+        name=tr("panel.prefix_ctrl"), default="")
     shape: EnumProperty(
         name=tr("panel.shape"),
         items=[
@@ -245,20 +247,23 @@ class CTRLDEF_PG_settings(PropertyGroup):
     parent: EnumProperty(
         name=tr("panel.parent"),
         items=[
-            ("DEF", "DEF stesso", ""),
-            ("BONE", "Bone genitore", ""),
-            ("ROOT", "Root", ""),
+            ("CHAIN", "Catena CTRL (FK)",
+             "Ricrea la gerarchia tra i controller generati (zero Dependency Cycle con ACTD)"),
+            ("BONE", "Bone genitore", "Usa il genitore del bone DEF"),
+            ("ROOT", "Root", "Collega alla radice dell'armatura"),
+            ("NONE", "Nessuno (Libero)", "Controller senza genitore"),
+            ("DEF", "DEF stesso (solo se DEF non copia CTRL)", "Collega al bone DEF stesso"),
         ],
-        default="DEF")
+        default="CHAIN")
     mirror: BoolProperty(
         name=tr("panel.mirror"), default=False)
     preset: EnumProperty(
         name=tr("panel.preset"),
         items=[
-            ("DEFAULT", "Default (Cerchio / DEF)", ""),
-            ("BIPED_LIMB", "Arto Bipede (Cubo / BONE)", ""),
+            ("DEFAULT", "Default (Cerchio / Catena)", ""),
+            ("BIPED_LIMB", "Arto Bipede (Cubo / Catena)", ""),
             ("ROOT_CTRL", "Root Controller (Freccia / ROOT)", ""),
-            ("FACE", "Faccia (Sfera / DEF)", ""),
+            ("FACE", "Faccia (Sfera / BONE)", ""),
         ],
         default="DEFAULT")
 
@@ -303,9 +308,15 @@ class CTRLDEF_OT_generate(Operator):
         # Radice per l'opzione parent="ROOT": primo bone senza genitore
         root_ebone = next((eb for eb in ebones if eb.parent is None), None)
         created = []
+        # Mappa DEF -> nome controller, serve per ricostruire la catena FK
+        def_to_ctrl_name = {}
         # Il controller è un bone dell'armatura, non un oggetto: ricalca il DEF
         for b in da_fare:
-            name = stg.prefix_ctrl + b.name[len(stg.prefix_def):]
+            base_name = b.name[len(stg.prefix_def):] if b.name.startswith(stg.prefix_def) else b.name
+            name = (stg.prefix_ctrl or "") + base_name
+            # Caso limite: senza prefisso DEF il nome coinciderebbe con quello del DEF
+            if name == b.name:
+                name = "CTRL_" + base_name
             ebone = ebones.get(name)
             if ebone is None:
                 ebone = ebones.new(name)
@@ -315,14 +326,31 @@ class CTRLDEF_OT_generate(Operator):
             else:
                 ebone.tail = b.head + Vector((0.0, 0.1, 0.0))
             ebone.roll = b.roll
-            # Parent del controller secondo l'opzione scelta nel pannello
+            # I controller non devono mai deformare la mesh
+            ebone.use_deform = False
+            def_to_ctrl_name[b.name] = name
+            created.append((name, b.name))
+        # Secondo passaggio per il parent: "CHAIN" richiede che i controller
+        # esistano già tutti, altrimenti la catena non si chiude
+        for b in da_fare:
+            ebone = ebones.get(def_to_ctrl_name[b.name])
+            if ebone is None:
+                continue
             if stg.parent == "DEF":
                 ebone.parent = b
             elif stg.parent == "BONE":
                 ebone.parent = b.parent
             elif stg.parent == "ROOT":
-                ebone.parent = None if root_ebone is b else root_ebone
-            created.append((name, b.name))
+                # I wrapper EditBone cambiano istanza: il confronto è per nome
+                ebone.parent = None if (root_ebone is not None and root_ebone.name == b.name) else root_ebone
+            elif stg.parent == "CHAIN":
+                # FK tra controller: il CTRL del figlio segue il CTRL del genitore
+                if b.parent is not None and b.parent.name in def_to_ctrl_name:
+                    ebone.parent = ebones.get(def_to_ctrl_name[b.parent.name])
+                else:
+                    ebone.parent = b.parent
+            elif stg.parent == "NONE":
+                ebone.parent = None
         bpy.ops.object.mode_set(mode='OBJECT')
         # Le forme sono oggetti mesh usati solo come custom_shape dei pose bone
         col = _ensure_collection()
@@ -367,13 +395,13 @@ class CTRLDEF_OT_apply_preset(Operator):
             stg.shape = "CIRCLE"
             stg.scale = 1.0
             stg.color = "NONE"
-            stg.parent = "DEF"
+            stg.parent = "CHAIN"
             stg.mirror = False
         elif p == "BIPED_LIMB":
             stg.shape = "CUBE"
             stg.scale = 0.8
             stg.color = "RED"
-            stg.parent = "BONE"
+            stg.parent = "CHAIN"
             stg.mirror = True
         elif p == "ROOT_CTRL":
             stg.shape = "ARROW"
@@ -385,7 +413,7 @@ class CTRLDEF_OT_apply_preset(Operator):
             stg.shape = "SPHERE"
             stg.scale = 0.3
             stg.color = "GREEN"
-            stg.parent = "DEF"
+            stg.parent = "BONE"
             stg.mirror = True
         return {'FINISHED'}
 
@@ -429,6 +457,91 @@ class CTRLDEF_OT_remove(Operator):
         return {'FINISHED'}
 
 
+class CTRLDEF_OT_bind_actd(Operator):
+    bl_idname = "ctrl_def.bind_actd"
+    bl_label = "Vincola DEF ai CTRL (ACTD)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def _apply_actd(self, context, stg):
+        """Integrazione diretta con ACTD: token sorgente CTRL, destinazione DEF."""
+        if not (hasattr(bpy.ops, "actd") and hasattr(bpy.ops.actd, "apply_transforms")):
+            return None
+        actd = getattr(context.scene, "actd_settings", None)
+        if actd is None:
+            return None
+        try:
+            if hasattr(actd, "source_token"):
+                actd.source_token = stg.prefix_ctrl or ""
+            if hasattr(actd, "source_token_type"):
+                actd.source_token_type = 'PREFIX'
+            if hasattr(actd, "dest_token"):
+                actd.dest_token = stg.prefix_def
+            if hasattr(actd, "dest_token_type"):
+                actd.dest_token_type = 'PREFIX'
+            # Con token sorgente vuoto il ramo nativo di ACTD usa la collezione
+            if not stg.prefix_ctrl and hasattr(actd, "use_collection_filter"):
+                actd.use_collection_filter = True
+                if hasattr(actd, "collection_source"):
+                    actd.collection_source = "CTRL"
+                if hasattr(actd, "collection_dest"):
+                    actd.collection_dest = ""
+            return bpy.ops.actd.apply_transforms()
+        except Exception:
+            # Qualsiasi incompatibilità ricade sul percorso nativo
+            return None
+
+    def _count_actd_bindings(self, arm, data):
+        """Conta i DEF già vincolati da ACTD verso il loro controller."""
+        bound = 0
+        for ctrl_name, info in data.items():
+            pb = arm.pose.bones.get(info.get("def", ""))
+            if pb is None:
+                continue
+            if any(c.type == 'COPY_TRANSFORMS' and c.subtarget == ctrl_name
+                   for c in pb.constraints):
+                bound += 1
+        return bound
+
+    def _apply_native(self, arm, data):
+        """Constraint COPY_TRANSFORMS nativi dal registro proprietario."""
+        done = 0
+        for ctrl_name, info in data.items():
+            def_name = info.get("def")
+            pb = arm.pose.bones.get(def_name) if def_name else None
+            if pb is None or arm.pose.bones.get(ctrl_name) is None:
+                continue
+            con = pb.constraints.get("CTRL_DEF_COPY_TRANSFORMS")
+            if con is None:
+                con = pb.constraints.new('COPY_TRANSFORMS')
+                con.name = "CTRL_DEF_COPY_TRANSFORMS"
+            con.target = arm
+            con.subtarget = ctrl_name
+            done += 1
+        return done
+
+    def execute(self, context):
+        arm = context.active_object
+        if arm is None or arm.type != "ARMATURE":
+            self.report({'ERROR'}, tr("msg.no_armature"))
+            return {'CANCELLED'}
+        stg = context.scene.ctrl_def_settings
+        if arm.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        data = _read_registry(arm)
+        if not data:
+            self.report({'ERROR'}, "Nessun controller registrato")
+            return {'CANCELLED'}
+        res = self._apply_actd(context, stg)
+        bound = 0
+        if res is not None and 'FINISHED' in res:
+            bound = self._count_actd_bindings(arm, data)
+        # Percorso nativo: il pulsante funziona anche senza ACTD
+        if bound == 0:
+            bound = self._apply_native(arm, data)
+        self.report({'INFO'}, "Vincoli DEF/CTRL: " + str(bound))
+        return {'FINISHED'}
+
+
 # ===========================================================================
 # Panel sidebar (N)
 # ===========================================================================
@@ -464,6 +577,7 @@ class CTRLDEF_PT_panel(Panel):
         layout.prop(stg, "mirror")
         layout.separator()
         layout.operator("ctrl_def.generate")
+        layout.operator("ctrl_def.bind_actd", icon='CONSTRAINT_BONE')
         layout.operator("ctrl_def.remove")
 
 
@@ -474,6 +588,7 @@ _classes = [
     CTRLDEF_PG_settings,
     CTRLDEF_OT_apply_preset,
     CTRLDEF_OT_generate,
+    CTRLDEF_OT_bind_actd,
     CTRLDEF_OT_remove,
     CTRLDEF_PT_panel,
 ]
