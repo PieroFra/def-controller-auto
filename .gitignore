@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+*.blend*
+test_out.txt
+dist/
+_build/
+
+# Derivati locali del nucleo deterministico (verdetto, telemetria, lock)
+/.opencode/metrics.jsonl
+/.opencode/verdict.txt
+/.opencode/gate.lock
+/.opencode/scratch/
+
+# File interni del progetto: non devono essere pubblicati su GitHub
+AGENTS.md
+opencode.json
+.opencode/
+tests/test_out.txt
+tests/run_blender.py

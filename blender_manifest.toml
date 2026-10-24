@@ -1,0 +1,37 @@
+schema_version = "1.0.0"
+
+id = "ctrl_def"
+version = "0.1.0"
+name = "DEF Controller Auto"
+tagline = "Generazione automatica di controller per bone DEF"
+maintainer = "Pierfrancesco Diodato"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+copyright = [
+  "2026 Pierfrancesco Diodato",
+]
+
+tags = [
+  "Rigging",
+]
+
+description = """
+Genera automaticamente controller (bone CTRL_) a partire da bone con prefisso DEF_.
+
+Caratteristiche:
+- Creazione bone controller in Edit Mode con orientamento e roll identici.
+- Assegnazione automatica di custom shape geometriche (Cerchio, Cubo, Sfera, Freccia, Croce).
+- Supporto a colori palette tema Blender (Rosso, Verde, Blu).
+- Raggruppamento automatico nella Bone Collection 'CTRL'.
+- Scelta della gerarchia di parentela (DEF stesso, Bone genitore, Root).
+- Mirroring automatico delle coppie simmetriche (.L / .R).
+- Tracciamento nel registro JSON sull'armatura e rimozione pulita in un click.
+- Preset veloci integrati (Default, Arto Bipede, Root Controller, Faccia).
+- Piena sinergia con Auto Copy Transforms DEF (A.C.T.D.).
+"""
