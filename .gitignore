@@ -21,3 +21,7 @@ tests/run_blender.py
 
 # Esperimenti locali (non pubblicati)
 _esperimenti/
+
+# Note interne di promozione e feedback (non vanno nel repo pubblico)
+docs/PROMO.md
+docs/FEEDBACK.md
