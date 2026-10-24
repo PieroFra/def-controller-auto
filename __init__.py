@@ -469,7 +469,14 @@ class CTRLDEF_OT_bind_actd(Operator):
         actd = getattr(context.scene, "actd_settings", None)
         if actd is None:
             return None
+        arm = context.active_object
         try:
+            # L'operatore di ACTD richiede l'armatura attiva e in modalita' POSE,
+            # altrimenti il suo poll() fallisce e si ricade sul percorso nativo
+            if arm is not None and arm.type == 'ARMATURE':
+                context.view_layer.objects.active = arm
+                if arm.mode != 'POSE':
+                    bpy.ops.object.mode_set(mode='POSE')
             if hasattr(actd, "source_token"):
                 actd.source_token = stg.prefix_ctrl or ""
             if hasattr(actd, "source_token_type"):
@@ -489,6 +496,14 @@ class CTRLDEF_OT_bind_actd(Operator):
         except Exception:
             # Qualsiasi incompatibilità ricade sul percorso nativo
             return None
+        finally:
+            # Si torna in OBJECT per lasciare l'armatura nello stato di partenza
+            if arm is not None and arm.type == 'ARMATURE' and arm.mode != 'OBJECT':
+                try:
+                    context.view_layer.objects.active = arm
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                except RuntimeError:
+                    pass
 
     def _count_actd_bindings(self, arm, data):
         """Conta i DEF già vincolati da ACTD verso il loro controller."""
@@ -525,6 +540,7 @@ class CTRLDEF_OT_bind_actd(Operator):
             self.report({'ERROR'}, tr("msg.no_armature"))
             return {'CANCELLED'}
         stg = context.scene.ctrl_def_settings
+        context.view_layer.objects.active = arm
         if arm.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         data = _read_registry(arm)
@@ -538,6 +554,8 @@ class CTRLDEF_OT_bind_actd(Operator):
         # Percorso nativo: il pulsante funziona anche senza ACTD
         if bound == 0:
             bound = self._apply_native(arm, data)
+        if arm.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
         self.report({'INFO'}, "Vincoli DEF/CTRL: " + str(bound))
         return {'FINISHED'}
 
