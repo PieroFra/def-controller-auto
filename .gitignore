@@ -15,6 +15,9 @@ _build/
 # File interni del progetto: non devono essere pubblicati su GitHub
 AGENTS.md
 opencode.json
-.opencode/
+/.opencode/
 tests/test_out.txt
 tests/run_blender.py
+
+# Esperimenti locali (non pubblicati)
+_esperimenti/

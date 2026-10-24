@@ -1,7 +1,7 @@
 bl_info = {
     "name": "DEF Controller Auto",
-    "author": "",
-    "version": (0, 1, 1),
+    "author": "Pierfrancesco Diodato",
+    "version": (0, 1, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > DEF Ctrl",
     "description": "Genera controller per bone DEF, tracciati e rimovibili",
@@ -26,17 +26,19 @@ from bpy.types import Operator, Panel, PropertyGroup
 _I18N = {
     "it": {
         "panel.label": "Controller DEF",
-        "panel.prefix_def": "Prefisso DEF",
-        "panel.prefix_ctrl": "Prefisso Controller",
+        "panel.prefix_def": "DEF",
+        "panel.prefix_ctrl": "CTRL",
         "panel.shape": "Forma",
         "panel.scale": "Scala",
         "panel.color": "Colore",
-        "panel.parent": "Parent",
+        "panel.parent": "Genitore",
         "panel.mirror": "Mirror L/R",
         "panel.preset": "Preset",
         "panel.stats": "Stato Armatura",
+        "stats.line": "DEF: %d  |  CTRL: %d",
         "op.generate": "Genera Controller",
         "op.create": "Crea Controller",
+        "op.bind_actd": "Vincola DEF ai CTRL (ACTD)",
         "op.remove": "Rimuovi Generati",
         "op.apply_preset": "Applica Preset",
         "msg.created": "Controller creati",
@@ -46,8 +48,8 @@ _I18N = {
     },
     "en": {
         "panel.label": "DEF Controller",
-        "panel.prefix_def": "DEF Prefix",
-        "panel.prefix_ctrl": "Controller Prefix",
+        "panel.prefix_def": "DEF",
+        "panel.prefix_ctrl": "CTRL",
         "panel.shape": "Shape",
         "panel.scale": "Scale",
         "panel.color": "Color",
@@ -55,7 +57,9 @@ _I18N = {
         "panel.mirror": "Mirror L/R",
         "panel.preset": "Preset",
         "panel.stats": "Armature Status",
+        "stats.line": "DEF: %d  |  CTRL: %d",
         "op.generate": "Generate Controllers",
+        "op.bind_actd": "Bind DEF to CTRL (ACTD)",
         "op.remove": "Remove Generated",
         "op.apply_preset": "Apply Preset",
         "msg.created": "Controllers created",
@@ -67,9 +71,11 @@ _I18N = {
 
 
 def tr(key, lang=None):
+    # La lingua di Blender arriva come "it_IT" / "en_US": si normalizza il prefisso
     if lang is None:
-        lang = bpy.context.preferences.view.language if bpy.context and bpy.context.preferences else "en"
-    return _I18N.get(lang, _I18N["en"]).get(key, key)
+        lang = (bpy.context.preferences.view.language or "en") if (bpy.context and bpy.context.preferences) else "en"
+    k = "it" if str(lang).lower().startswith("it") else "en"
+    return _I18N.get(k, _I18N["en"]).get(key, key)
 
 
 # ===========================================================================
@@ -149,15 +155,17 @@ def _side_of(name):
 
 def _mirror_name(name):
     side = _side_of(name)
-    base = name
-    for suf in (".L", "_L", ".R", "_R"):
-        if base.endswith(suf):
-            base = base[: -len(suf)]
-            break
-    if side == "L":
-        return base + ".R"
-    if side == "R":
-        return base + ".L"
+    if side == "C":
+        return name
+    # Il separatore originale va preservato: DEF_hand_L -> DEF_hand_R,
+    # DEF_hand.L -> DEF_hand.R (Rigify/standard Blender)
+    opposto = {"L": "R", "R": "L"}[side]
+    up = name.upper()
+    for sep in (".", "_"):
+        for s in ("L", "R"):
+            suf = sep + s
+            if up.endswith(suf):
+                return name[: -len(suf)] + sep + opposto
     return name
 
 
@@ -213,6 +221,27 @@ def _create_shape_object(shape, radius, col):
     return obj
 
 
+def _get_or_create_shape(shape, col):
+    """Restituisce la custom shape condivisa per forma (una sola per tipo).
+
+    La dimensione per controller resta su pose bone.custom_shape_scale_xyz,
+    quindi l'oggetto mesh e' unico: CTRL_DEF_SHAPE_CIRCLE, ..._CUBE, ecc.
+    """
+    name = f"CTRL_DEF_SHAPE_{shape}"
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        obj = _create_shape_object(shape, 1.0, col)
+        obj.name = name
+        obj.location = (0.0, 0.0, 0.0)
+    elif obj.name not in {o.name for o in col.objects}:
+        # Ricollega alla collezione attesa se l'utente l'ha spostata/rimossa
+        col.objects.link(obj)
+    # Nome canonico anche per la mesh dati (evita CTRL_Shape.001)
+    if obj.data is not None:
+        obj.data.name = name
+    return obj
+
+
 # ===========================================================================
 # PropertyGroup impostazioni utente
 # ===========================================================================
@@ -260,10 +289,10 @@ class CTRLDEF_PG_settings(PropertyGroup):
     preset: EnumProperty(
         name=tr("panel.preset"),
         items=[
-            ("DEFAULT", "Default (Cerchio / Catena)", ""),
-            ("BIPED_LIMB", "Arto Bipede (Cubo / Catena)", ""),
-            ("ROOT_CTRL", "Root Controller (Freccia / ROOT)", ""),
-            ("FACE", "Faccia (Sfera / BONE)", ""),
+            ("DEFAULT", "Default (Cerchio)", ""),
+            ("BIPED_LIMB", "Arto Bipede (Cubo)", ""),
+            ("ROOT_CTRL", "Root (Freccia)", ""),
+            ("FACE", "Faccia (Sfera)", ""),
         ],
         default="DEFAULT")
 
@@ -351,6 +380,16 @@ class CTRLDEF_OT_generate(Operator):
                     ebone.parent = b.parent
             elif stg.parent == "NONE":
                 ebone.parent = None
+        # ebones.new() puo' azzerare la selezione degli altri bone: si
+        # ripristina esplicitamente sui DEF elaborati, cosi' una generate
+        # successiva (senza rientrare a mano in Edit Mode) li ritrova
+        for b in da_fare:
+            eb = ebones.get(b.name)
+            if eb is None:
+                continue
+            eb.select = True
+            eb.select_head = True
+            eb.select_tail = True
         bpy.ops.object.mode_set(mode='OBJECT')
         # Le forme sono oggetti mesh usati solo come custom_shape dei pose bone
         col = _ensure_collection()
@@ -365,12 +404,9 @@ class CTRLDEF_OT_generate(Operator):
             pbone = arm.pose.bones.get(name)
             if pbone is None:
                 continue
-            shape = pbone.custom_shape
-            if shape is None:
-                shape = _create_shape_object(stg.shape, 1.0, col)
-                shape.name = name + "_shape"
-                shape.location = (0.0, 0.0, 0.0)
-            pbone.custom_shape = shape
+            # Shape condivisa per forma: ricalcolata a ogni generate, così un
+            # cambio di forma aggiorna anche i controller già esistenti
+            pbone.custom_shape = _get_or_create_shape(stg.shape, col)
             pbone.custom_shape_scale_xyz = (stg.scale, stg.scale, stg.scale)
             # Colore del controller (se scelto un colore non NONE)
             if palette:
@@ -430,14 +466,10 @@ class CTRLDEF_OT_remove(Operator):
             return {'CANCELLED'}
         data = _read_registry(arm)
         if not data:
+            # Nessun controller registrato: si ripuliscono solo le shape orfane
+            self._purge_shapes(arm)
             self.report({'INFO'}, tr("msg.removed") + ": 0")
             return {'FINISHED'}
-        # Raccoglie le forme da eliminare prima di entrare in Edit Mode
-        shapes = []
-        for name in data.keys():
-            pbone = arm.pose.bones.get(name)
-            if pbone is not None and pbone.custom_shape is not None:
-                shapes.append(pbone.custom_shape)
         removed = 0
         if arm.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -450,11 +482,35 @@ class CTRLDEF_OT_remove(Operator):
                 removed += 1
             _forget_generated(arm, name)
         bpy.ops.object.mode_set(mode='OBJECT')
-        for shape in shapes:
-            if bpy.data.objects.get(shape.name) is not None:
-                bpy.data.objects.remove(shape, do_unlink=True)
+        # Le shape sono condivise: si eliminano solo se nessun pose bone le usa
+        self._purge_shapes(arm)
         self.report({'INFO'}, tr("msg.removed") + ": " + str(removed))
         return {'FINISHED'}
+
+    @staticmethod
+    def _purge_shapes(arm):
+        """Elimina le shape della collezione CTRL_Shapes rimaste inutilizzate.
+
+        Vale per le shape condivise CTRL_DEF_SHAPE_* e per le vecchie shape
+        per-controller <nome>_shape: se un pose bone dell'armatura le usa
+        ancora (es. controller cancellato a mano in Edit Mode) restano.
+        """
+        # I pose bone si allineano ai bone solo uscendo da Edit Mode: leggere
+        # custom_shape mentre i controller appena rimossi sono ancora in Edit
+        # farebbe risultare "usate" le loro shape, quindi si esce prima
+        if arm.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        in_uso = {pb.custom_shape.name for pb in arm.pose.bones
+                  if pb.custom_shape is not None}
+        col = bpy.data.collections.get("CTRL_Shapes")
+        nomi_col = {o.name for o in col.objects} if col is not None else set()
+        for obj in list(bpy.data.objects):
+            if obj.type != 'MESH' or obj.name in in_uso:
+                continue
+            condivisa = obj.name.startswith("CTRL_DEF_SHAPE_")
+            legacy = obj.name.endswith("_shape") and obj.name in nomi_col
+            if condivisa or legacy:
+                bpy.data.objects.remove(obj, do_unlink=True)
 
 
 class CTRLDEF_OT_bind_actd(Operator):
@@ -581,22 +637,22 @@ class CTRLDEF_PT_panel(Panel):
             eb_count = len(arm.data.bones)
             def_count = sum(1 for b in arm.data.bones if _is_def_bone(b, stg.prefix_def))
             ctrl_count = len(data)
-            box.label(text=f"DEF trovati: {def_count} | CTRL generati: {ctrl_count}")
+            box.label(text=tr("stats.line") % (def_count, ctrl_count))
         box_p = layout.box()
         row = box_p.row(align=True)
-        row.prop(stg, "preset")
+        row.prop(stg, "preset", text=tr("panel.preset"))
         row.operator("ctrl_def.apply_preset", text="", icon='CHECKMARK')
-        layout.prop(stg, "prefix_def")
-        layout.prop(stg, "prefix_ctrl")
-        layout.prop(stg, "shape")
-        layout.prop(stg, "scale")
-        layout.prop(stg, "color")
-        layout.prop(stg, "parent")
-        layout.prop(stg, "mirror")
+        layout.prop(stg, "prefix_def", text=tr("panel.prefix_def"))
+        layout.prop(stg, "prefix_ctrl", text=tr("panel.prefix_ctrl"))
+        layout.prop(stg, "shape", text=tr("panel.shape"))
+        layout.prop(stg, "scale", text=tr("panel.scale"))
+        layout.prop(stg, "color", text=tr("panel.color"))
+        layout.prop(stg, "parent", text=tr("panel.parent"))
+        layout.prop(stg, "mirror", text=tr("panel.mirror"))
         layout.separator()
-        layout.operator("ctrl_def.generate")
-        layout.operator("ctrl_def.bind_actd", icon='CONSTRAINT_BONE')
-        layout.operator("ctrl_def.remove")
+        layout.operator("ctrl_def.generate", text=tr("op.generate"), icon='BONE_DATA')
+        layout.operator("ctrl_def.bind_actd", text=tr("op.bind_actd"), icon='CONSTRAINT_BONE')
+        layout.operator("ctrl_def.remove", text=tr("op.remove"), icon='TRASH')
 
 
 # ===========================================================================

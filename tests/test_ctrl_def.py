@@ -2,9 +2,32 @@
 # Eseguito dentro Blender (headless) da run_tests.ps1
 
 import bpy
+import importlib.util
 import json
 import math
+import os
+import sys
 from mathutils import Vector
+
+# Percorso dell'addon (single file __init__.py) per il caricamento diretto
+_PATH_ADDON = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "__init__.py"))
+
+
+def _addon_module():
+    """Modulo dell'addon: quello del runner se presente, altrimenti dal file.
+
+    Il caricamento da file avviene senza register(): serve solo per leggere
+    bl_info e le funzioni pure (_read_registry, _mirror_name, ...).
+    """
+    mod = sys.modules.get("ctrl_def_addon") or sys.modules.get("ctrl_def_src")
+    if mod is not None and isinstance(getattr(mod, "bl_info", None), dict):
+        return mod
+    spec = importlib.util.spec_from_file_location("ctrl_def_src", _PATH_ADDON)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ctrl_def_src"] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _reset():
@@ -61,6 +84,23 @@ def test_registration_elements():
     assert stg.prefix_ctrl == "", f"prefix_ctrl deve essere vuoto di default, trovato {stg.prefix_ctrl!r}"
     assert stg.parent == "CHAIN", f"parent di default deve essere CHAIN, trovato {stg.parent!r}"
     assert stg.prefix_def == "DEF_", f"prefix_def di default inatteso: {stg.prefix_def!r}"
+    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.1.2
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non trovato: impossibile leggere bl_info"
+    bl_info = mod.bl_info
+    assert bl_info["author"] == "Pierfrancesco Diodato", \
+        f"bl_info['author'] inatteso: {bl_info['author']!r}"
+    assert tuple(bl_info["version"]) == (0, 1, 2), \
+        f"bl_info['version'] inattesa: {bl_info['version']!r}"
+    # Nome, categoria e bl_idname non devono cambiare
+    assert bl_info["name"] == "DEF Controller Auto", f"bl_info['name'] cambiato: {bl_info['name']!r}"
+    assert bl_info["category"] == "Rigging", f"bl_info['category'] cambiata: {bl_info['category']!r}"
+    # Mirror: il separatore originale va preservato (_, .)
+    assert mod._mirror_name("DEF_hand_L") == "DEF_hand_R", \
+        f"Mirror di DEF_hand_L: {mod._mirror_name('DEF_hand_L')!r} invece di 'DEF_hand_R'"
+    assert mod._mirror_name("DEF_hand.R") == "DEF_hand.L", \
+        f"Mirror di DEF_hand.R: {mod._mirror_name('DEF_hand.R')!r} invece di 'DEF_hand.L'"
+    assert mod._mirror_name("DEF_hand") == "DEF_hand", "Un nome centrale non deve essere specchiato"
 
 
 def test_naming_pulito_e_prefisso():
@@ -95,6 +135,39 @@ def test_naming_pulito_e_prefisso():
     reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
     assert reg.get("CTRL_hand.L", {}).get("def") == "DEF_hand.L", f"Registry errato con prefisso: {reg}"
 
+    # 3. Mirror con un solo lato: esiste .L e non .R -> non crasha, crea solo .L
+    _reset()
+    bpy.context.scene.ctrl_def_settings.mirror = True
+    arm_obj, arm_data = _new_armature("RigMirrorSoloL")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Mirror con solo .L fallito: {res}"
+    assert "arm.L" in arm_data.bones, f"Controller arm.L assente: {[b.name for b in arm_data.bones]}"
+    assert "arm.R" not in arm_data.bones, "Con mirror=True non deve nascere un .R inesistente"
+    assert len(arm_data.bones) == 2, \
+        f"Attesi solo DEF_arm.L + arm.L, trovati: {[b.name for b in arm_data.bones]}"
+
+    # 4. Nomi con separatore underscore: DEF_arm_L + DEF_arm_R con mirror=True
+    _reset()
+    bpy.context.scene.ctrl_def_settings.mirror = True
+    arm_obj, arm_data = _new_armature("RigMirrorUnderscore")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm_L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "DEF_arm_R", (0.0, 0.0, -1.0), (0.0, 0.0, -1.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Mirror con separatore _ fallito: {res}"
+    for nm in ("arm_L", "arm_R"):
+        assert nm in arm_data.bones, \
+            f"Controller {nm} assente (separatore _ non preservato?): {[b.name for b in arm_data.bones]}"
+    for nm in ("arm.L", "arm.R"):
+        assert nm not in arm_data.bones, f"Non deve comparire {nm} partendo da nomi con _"
+    reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    assert reg.get("arm_L", {}).get("def") == "DEF_arm_L", f"Registry errato per arm_L: {reg}"
+    assert reg.get("arm_R", {}).get("def") == "DEF_arm_R", f"Registry errato per arm_R: {reg}"
+
 
 def test_parent_chain_fk():
     _reset()
@@ -119,6 +192,86 @@ def test_parent_chain_fk():
         path = _walk_up(arm_data.bones[nm])
         assert len(path) == len(set(path)), f"Anello di gerarchia rilevato per {nm}: {path}"
         assert all(not p.startswith("DEF_") for p in path), f"{nm} dipende da un bone DEF: {path}"
+
+    # Shape condivisa: 3 controller con CUBE puntano allo stesso oggetto
+    stg.shape = "CUBE"
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Rigenerazione con shape CUBE fallita: {res}"
+    shape_cube = bpy.data.objects.get("CTRL_DEF_SHAPE_CUBE")
+    assert shape_cube is not None, "Oggetto condiviso CTRL_DEF_SHAPE_CUBE non creato"
+    assert shape_cube.data.name == "CTRL_DEF_SHAPE_CUBE", \
+        f"Nome mesh della shape non canonico: {shape_cube.data.name!r}"
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        cs = arm_obj.pose.bones[nm].custom_shape
+        assert cs is not None, f"custom_shape mancante su {nm}"
+        assert cs.name == "CTRL_DEF_SHAPE_CUBE", \
+            f"{nm} usa {cs.name!r} invece della shape condivisa CTRL_DEF_SHAPE_CUBE"
+        assert cs.name == shape_cube.name, f"{nm} non punta allo stesso oggetto degli altri controller"
+    # Tutte le shape condivise finiscono nella collezione CTRL_Shapes
+    col_shapes = bpy.data.collections.get("CTRL_Shapes")
+    assert col_shapes is not None, "Collezione CTRL_Shapes mancante"
+    assert shape_cube.name in {o.name for o in col_shapes.objects}, \
+        "CTRL_DEF_SHAPE_CUBE non e' collegata alla collezione CTRL_Shapes"
+
+    # Doppia esecuzione: idempotente, non duplica ne' bone ne' shape
+    ossa = len(arm_data.bones)
+    forme = len([o for o in bpy.data.objects if o.name.startswith("CTRL_DEF_SHAPE_")])
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Seconda generazione fallita: {res}"
+    assert len(arm_data.bones) == ossa, \
+        f"Seconda generazione ha duplicato i bone: {ossa} -> {len(arm_data.bones)}"
+    assert len([o for o in bpy.data.objects if o.name.startswith("CTRL_DEF_SHAPE_")]) == forme, \
+        "Seconda generazione ha duplicato le shape condivise"
+    reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    assert len(reg) == 3, f"Registry duplicato dopo doppia esecuzione: {reg}"
+
+    # Selezione parziale: DEF_arm.L -> DEF_forearm.L -> DEF_hand.L con il
+    # bone centrale non selezionato
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.shape = "CIRCLE"
+    arm_obj, arm_data = _new_armature("RigParziale")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    arm_data.edit_bones["DEF_forearm.L"].select = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Selezione parziale fallita: {res}"
+    assert "arm.L" in arm_data.bones, "arm.L non creato con selezione parziale"
+    assert "hand.L" in arm_data.bones, "hand.L non creato con selezione parziale"
+    assert "forearm.L" not in arm_data.bones, \
+        "forearm.L creato pur non essendo selezionato il suo DEF"
+    reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    assert set(reg.keys()) == {"arm.L", "hand.L"}, f"Registry inatteso: {reg}"
+    for nm in ("arm.L", "hand.L"):
+        path = _walk_up(arm_data.bones[nm])
+        assert len(path) == len(set(path)), f"Anello di gerarchia con selezione parziale: {path}"
+
+    # Registry corrotto: la lettura non solleva eccezioni e ritorna {}
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per _read_registry"
+    valido = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    arm_obj["_ctrl_def_generated"] = "{bad json"
+    assert mod._read_registry(arm_obj) == {}, "Registry corrotto non gestito: atteso {}"
+    arm_obj["_ctrl_def_generated"] = json.dumps(valido)
+
+    # Cancellazione manuale di un controller in Edit Mode prima di remove():
+    # non deve crashare e deve pulire il registry
+    bpy.ops.object.mode_set(mode='EDIT')
+    ebone = arm_data.edit_bones.get("hand.L")
+    assert ebone is not None, "Controller hand.L assente prima della cancellazione manuale"
+    arm_data.edit_bones.remove(ebone)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res = bpy.ops.ctrl_def.remove()
+    assert res == {'FINISHED'}, f"remove() fallito dopo cancellazione manuale: {res}"
+    reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    assert reg == {}, f"Registry non pulito dopo remove(): {reg}"
+    assert "arm.L" not in arm_data.bones, "arm.L non rimosso da remove()"
+    assert "DEF_arm.L" in arm_data.bones, "remove() non deve toccare i bone DEF"
+    # Nessun controller residuo: la shape condivisa non serve piu' e va eliminata
+    assert bpy.data.objects.get("CTRL_DEF_SHAPE_CIRCLE") is None, \
+        "La shape condivisa inutilizzata non e' stata eliminata da remove()"
 
 
 def test_bind_actd_rotazione():
@@ -180,7 +333,24 @@ def test_presets():
         assert stg.mirror is mirror, f"Preset {nome}: mirror {stg.mirror} invece di {mirror}"
 
 
+def _registra_addon_se_mancante():
+    """Carica e registra ../__init__.py se l'addon non e' ancora caricato.
+
+    Serve per l'esecuzione diretta:
+    blender --background --factory-startup --python tests/test_ctrl_def.py
+    """
+    if hasattr(bpy.ops.ctrl_def, "generate"):
+        return None
+    spec = importlib.util.spec_from_file_location("ctrl_def", _PATH_ADDON)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ctrl_def"] = mod
+    spec.loader.exec_module(mod)
+    mod.register()
+    return mod
+
+
 if __name__ == "__main__":
+    _registra_addon_se_mancante()
     test_registration_elements()
     test_naming_pulito_e_prefisso()
     test_parent_chain_fk()
