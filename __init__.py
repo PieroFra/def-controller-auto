@@ -45,6 +45,32 @@ _I18N = {
         "msg.removed": "Controller rimossi",
         "msg.no_armature": "Nessuna armatura attiva",
         "msg.no_def_bones": "Nessun bone DEF selezionato",
+        "msg.no_registered": "Nessun controller registrato",
+        "msg.bound": "Vincoli DEF/CTRL",
+        # Voci delle EnumProperty (callback _items_shape/_items_color/...)
+        "shape.circle": "Cerchio",
+        "shape.cube": "Cubo",
+        "shape.sphere": "Sfera",
+        "shape.arrow": "Freccia",
+        "shape.cross": "Croce",
+        "color.none": "Nessuno",
+        "color.red": "Rosso",
+        "color.green": "Verde",
+        "color.blue": "Blu",
+        "parent.chain": "Catena CTRL (FK)",
+        "parent.chain_tip": "Ricrea la gerarchia tra i controller generati (zero Dependency Cycle con ACTD)",
+        "parent.bone": "Bone genitore",
+        "parent.bone_tip": "Usa il genitore del bone DEF",
+        "parent.root": "Root",
+        "parent.root_tip": "Collega alla radice dell'armatura",
+        "parent.none": "Nessuno (Libero)",
+        "parent.none_tip": "Controller senza genitore",
+        "parent.def": "DEF stesso (solo senza ACTD)",
+        "parent.def_tip": "Collega al bone DEF stesso",
+        "preset.default": "Default (Cerchio)",
+        "preset.biped": "Arto Bipede (Cubo)",
+        "preset.root": "Root (Freccia)",
+        "preset.face": "Faccia (Sfera)",
     },
     "en": {
         "panel.label": "DEF Controller",
@@ -66,14 +92,50 @@ _I18N = {
         "msg.removed": "Controllers removed",
         "msg.no_armature": "No active armature",
         "msg.no_def_bones": "No DEF bones selected",
+        "msg.no_registered": "No registered controllers",
+        "msg.bound": "DEF/CTRL bindings",
+        "shape.circle": "Circle",
+        "shape.cube": "Cube",
+        "shape.sphere": "Sphere",
+        "shape.arrow": "Arrow",
+        "shape.cross": "Cross",
+        "color.none": "None",
+        "color.red": "Red",
+        "color.green": "Green",
+        "color.blue": "Blue",
+        "parent.chain": "CTRL Chain (FK)",
+        "parent.chain_tip": "Rebuilds the hierarchy between generated controllers (no Dependency Cycle with ACTD)",
+        "parent.bone": "Parent Bone",
+        "parent.bone_tip": "Uses the parent of the DEF bone",
+        "parent.root": "Root",
+        "parent.root_tip": "Links to the armature root",
+        "parent.none": "None (Free)",
+        "parent.none_tip": "Controller without a parent",
+        "parent.def": "DEF itself (only without ACTD)",
+        "parent.def_tip": "Links to the DEF bone itself",
+        "preset.default": "Default (Circle)",
+        "preset.biped": "Biped Limb (Cube)",
+        "preset.root": "Root (Arrow)",
+        "preset.face": "Face (Sphere)",
     },
 }
 
 
 def tr(key, lang=None):
-    # La lingua di Blender arriva come "it_IT" / "en_US": si normalizza il prefisso
+    # La lingua attiva si legge dalla preferenza della UI e, in mancanza, dal
+    # locale delle traduzioni: entrambe arrivano come "it_IT" / "en_US", quindi
+    # si normalizza il prefisso. Fallback su "en".
     if lang is None:
-        lang = (bpy.context.preferences.view.language or "en") if (bpy.context and bpy.context.preferences) else "en"
+        lang = "en"
+        try:
+            lang = bpy.context.preferences.view.language or lang
+        except (AttributeError, RuntimeError):
+            lang = "en"
+        if not str(lang).lower().startswith(("it", "en")):
+            try:
+                lang = bpy.app.translations.locale or lang
+            except AttributeError:
+                pass
     k = "it" if str(lang).lower().startswith("it") else "en"
     return _I18N.get(k, _I18N["en"]).get(key, key)
 
@@ -243,6 +305,54 @@ def _get_or_create_shape(shape, col):
 
 
 # ===========================================================================
+# Voci delle EnumProperty (callback: etichette tradotte a ogni disegno)
+# ===========================================================================
+# Con items come funzione callback il valore di default non e' piu' una
+# stringa ma l'indice intero: il primo elemento (indice 0) e' il default,
+# quindi non si passa default= e la prima voce resta quella attesa.
+def _items_shape(self, context):
+    """Forme disponibili per la custom shape del controller."""
+    return [
+        ("CIRCLE", tr("shape.circle"), ""),
+        ("CUBE", tr("shape.cube"), ""),
+        ("SPHERE", tr("shape.sphere"), ""),
+        ("ARROW", tr("shape.arrow"), ""),
+        ("CROSS", tr("shape.cross"), ""),
+    ]
+
+
+def _items_color(self, context):
+    """Colori del controller (palette tema di Blender)."""
+    return [
+        ("NONE", tr("color.none"), ""),
+        ("RED", tr("color.red"), ""),
+        ("GREEN", tr("color.green"), ""),
+        ("BLUE", tr("color.blue"), ""),
+    ]
+
+
+def _items_parent(self, context):
+    """Modalita' di parenting dei controller generati."""
+    return [
+        ("CHAIN", tr("parent.chain"), tr("parent.chain_tip")),
+        ("BONE", tr("parent.bone"), tr("parent.bone_tip")),
+        ("ROOT", tr("parent.root"), tr("parent.root_tip")),
+        ("NONE", tr("parent.none"), tr("parent.none_tip")),
+        ("DEF", tr("parent.def"), tr("parent.def_tip")),
+    ]
+
+
+def _items_preset(self, context):
+    """Preset rapidi: forma, scala, colore, parent e mirror."""
+    return [
+        ("DEFAULT", tr("preset.default"), ""),
+        ("BIPED_LIMB", tr("preset.biped"), ""),
+        ("ROOT_CTRL", tr("preset.root"), ""),
+        ("FACE", tr("preset.face"), ""),
+    ]
+
+
+# ===========================================================================
 # PropertyGroup impostazioni utente
 # ===========================================================================
 class CTRLDEF_PG_settings(PropertyGroup):
@@ -252,49 +362,165 @@ class CTRLDEF_PG_settings(PropertyGroup):
     # DEF_hand.L -> hand.L. Con "CTRL_" si ottiene CTRL_hand.L.
     prefix_ctrl: StringProperty(
         name=tr("panel.prefix_ctrl"), default="")
+    # Default = prima voce della callback: CIRCLE
     shape: EnumProperty(
         name=tr("panel.shape"),
-        items=[
-            ("CIRCLE", "Cerchio", ""),
-            ("CUBE", "Cubo", ""),
-            ("SPHERE", "Sfera", ""),
-            ("ARROW", "Freccia", ""),
-            ("CROSS", "Croce", ""),
-        ],
-        default="CIRCLE")
+        items=_items_shape)
     scale: FloatProperty(
         name=tr("panel.scale"), default=1.0, min=0.01)
+    # Default = prima voce della callback: NONE
     color: EnumProperty(
         name=tr("panel.color"),
-        items=[
-            ("NONE", "Nessuno", ""),
-            ("RED", "Rosso", ""),
-            ("GREEN", "Verde", ""),
-            ("BLUE", "Blu", ""),
-        ],
-        default="NONE")
+        items=_items_color)
+    # Default = prima voce della callback: CHAIN
     parent: EnumProperty(
         name=tr("panel.parent"),
-        items=[
-            ("CHAIN", "Catena CTRL (FK)",
-             "Ricrea la gerarchia tra i controller generati (zero Dependency Cycle con ACTD)"),
-            ("BONE", "Bone genitore", "Usa il genitore del bone DEF"),
-            ("ROOT", "Root", "Collega alla radice dell'armatura"),
-            ("NONE", "Nessuno (Libero)", "Controller senza genitore"),
-            ("DEF", "DEF stesso (solo se DEF non copia CTRL)", "Collega al bone DEF stesso"),
-        ],
-        default="CHAIN")
+        items=_items_parent)
     mirror: BoolProperty(
         name=tr("panel.mirror"), default=False)
+    # Default = prima voce della callback: DEFAULT
     preset: EnumProperty(
         name=tr("panel.preset"),
-        items=[
-            ("DEFAULT", "Default (Cerchio)", ""),
-            ("BIPED_LIMB", "Arto Bipede (Cubo)", ""),
-            ("ROOT_CTRL", "Root (Freccia)", ""),
-            ("FACE", "Faccia (Sfera)", ""),
-        ],
-        default="DEFAULT")
+        items=_items_preset)
+
+
+# ===========================================================================
+# Helper della generazione controller (usati da CTRLDEF_OT_generate)
+# ===========================================================================
+def _collect_def_bones(ebones, stg):
+    """Raccoglie i bone DEF selezionati in Edit Mode.
+
+    Se stg.mirror e' attivo aggiunge la controparte specchiata L/R, ma solo se
+    esiste davvero nell'armatura e se non e' gia' nella lista: nessun bone
+    viene inventato e nessun nome viene ripetuto.
+    Restituisce la lista degli EditBone da elaborare.
+    """
+    sel = [b for b in ebones if b.select and _is_def_bone(b, stg.prefix_def)]
+    da_fare = []
+    visti = set()
+    for b in sel:
+        da_fare.append(b)
+        visti.add(b.name)
+        if stg.mirror:
+            mname = _mirror_name(b.name)
+            if mname != b.name and mname not in visti:
+                mb = ebones.get(mname)
+                if mb is not None and _is_def_bone(mb, stg.prefix_def):
+                    da_fare.append(mb)
+                    visti.add(mname)
+    return da_fare
+
+
+def _create_ctrl_edit_bones(ebones, da_fare, stg):
+    """Crea o aggiorna gli EditBone dei controller ricalcando i bone DEF.
+
+    Il controller e' un bone dell'armatura, non un oggetto: ne copia head,
+    tail e roll, con guardia sul bone di lunghezza zero, e ha sempre
+    use_deform = False.
+    Restituisce (created, def_to_ctrl_name): la lista delle coppie
+    (nome controller, nome DEF) e la mappa DEF -> controller.
+    """
+    created = []
+    # Mappa DEF -> nome controller, serve per ricostruire la catena FK
+    def_to_ctrl_name = {}
+    for b in da_fare:
+        base_name = b.name[len(stg.prefix_def):] if b.name.startswith(stg.prefix_def) else b.name
+        name = (stg.prefix_ctrl or "") + base_name
+        # Caso limite: senza prefisso DEF il nome coinciderebbe con quello del DEF
+        if name == b.name:
+            name = "CTRL_" + base_name
+        ebone = ebones.get(name)
+        if ebone is None:
+            ebone = ebones.new(name)
+        ebone.head = b.head.copy()
+        if (b.tail - b.head).length > 1e-6:
+            ebone.tail = b.tail.copy()
+        else:
+            # Un bone di lunghezza nulla e' invalido: si allunga di un minimo
+            ebone.tail = b.head + Vector((0.0, 0.1, 0.0))
+        ebone.roll = b.roll
+        # I controller non devono mai deformare la mesh
+        ebone.use_deform = False
+        def_to_ctrl_name[b.name] = name
+        created.append((name, b.name))
+    return created, def_to_ctrl_name
+
+
+def _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg):
+    """Imposta il genitore di ciascun controller secondo stg.parent.
+
+    Va chiamata dopo _create_ctrl_edit_bones: "CHAIN" richiede che tutti i
+    controller esistano gia', altrimenti la catena non si chiude.
+    Al termine ripristina select / select_head / select_tail sui bone DEF
+    elaborati, perche' ebones.new() puo' azzerarli e una generate successiva
+    deve ritrovarli senza rientrare a mano in Edit Mode.
+    """
+    # Radice per l'opzione parent="ROOT": primo bone senza genitore che non
+    # sia un controller appena creato
+    ctrl_names = set(def_to_ctrl_name.values())
+    root_ebone = next((eb for eb in ebones if eb.parent is None and eb.name not in ctrl_names), None)
+    # Secondo passaggio per il parent
+    for b in da_fare:
+        ebone = ebones.get(def_to_ctrl_name[b.name])
+        if ebone is None:
+            continue
+        if stg.parent == "DEF":
+            ebone.parent = b
+        elif stg.parent == "BONE":
+            ebone.parent = b.parent
+        elif stg.parent == "ROOT":
+            # I wrapper EditBone cambiano istanza: il confronto e' per nome
+            ebone.parent = None if (root_ebone is not None and root_ebone.name == b.name) else root_ebone
+        elif stg.parent == "CHAIN":
+            # FK tra controller: il CTRL del figlio segue il CTRL del genitore
+            if b.parent is not None and b.parent.name in def_to_ctrl_name:
+                ebone.parent = ebones.get(def_to_ctrl_name[b.parent.name])
+            else:
+                ebone.parent = b.parent
+        elif stg.parent == "NONE":
+            ebone.parent = None
+    for b in da_fare:
+        eb = ebones.get(b.name)
+        if eb is None:
+            continue
+        eb.select = True
+        eb.select_head = True
+        eb.select_tail = True
+
+
+def _configure_ctrl_pose_bones(arm, created, stg):
+    """In Object Mode applica shape, scala, colore e registro ai pose bone.
+
+    Assicura la collezione oggetti "CTRL_Shapes" e la Bone Collection "CTRL",
+    usa una custom shape condivisa per forma e iscrive ogni coppia nel
+    registro JSON con _mark_generated. Restituisce il numero di controller
+    configurati.
+    """
+    # Le forme sono oggetti mesh usati solo come custom_shape dei pose bone
+    col = _ensure_collection()
+    # Tutti i controller generati finiscono nella bone collection "CTRL"
+    bcoll = arm.data.collections.get("CTRL")
+    if bcoll is None:
+        bcoll = arm.data.collections.new("CTRL")
+    # Palette colore in funzione dell'opzione del pannello
+    palette = {"RED": "THEME04", "GREEN": "THEME07", "BLUE": "THEME12"}.get(stg.color)
+    for name, def_name in created:
+        bone = arm.data.bones.get(name)
+        pbone = arm.pose.bones.get(name)
+        if pbone is None:
+            continue
+        # Shape condivisa per forma: ricalcolata a ogni generate, così un
+        # cambio di forma aggiorna anche i controller già esistenti
+        pbone.custom_shape = _get_or_create_shape(stg.shape, col)
+        pbone.custom_shape_scale_xyz = (stg.scale, stg.scale, stg.scale)
+        # Colore del controller (se scelto un colore non NONE)
+        if palette:
+            pbone.color.palette = palette
+        # Iscrizione alla bone collection "CTRL"
+        if bone is not None and bcoll.name not in (c.name for c in bone.collections):
+            bcoll.assign(bone)
+        _mark_generated(arm, name, def_name)
+    return len(created)
 
 
 # ===========================================================================
@@ -306,8 +532,7 @@ class CTRLDEF_OT_generate(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        scn = context.scene
-        stg = scn.ctrl_def_settings
+        stg = context.scene.ctrl_def_settings
         arm = context.active_object
         if arm is None or arm.type != "ARMATURE":
             self.report({'ERROR'}, tr("msg.no_armature"))
@@ -316,106 +541,16 @@ class CTRLDEF_OT_generate(Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.mode_set(mode='EDIT')
         ebones = arm.data.edit_bones
-        sel = [b for b in ebones if b.select and _is_def_bone(b, stg.prefix_def)]
-        if not sel:
+        da_fare = _collect_def_bones(ebones, stg)
+        if not da_fare:
             bpy.ops.object.mode_set(mode='OBJECT')
             self.report({'ERROR'}, tr("msg.no_def_bones"))
             return {'CANCELLED'}
-        # Elabora i bone selezionati e, se richiesto, i corrispondenti specchiati L/R
-        da_fare = []
-        visti = set()
-        for b in sel:
-            da_fare.append(b)
-            visti.add(b.name)
-            if stg.mirror:
-                mname = _mirror_name(b.name)
-                if mname != b.name and mname not in visti:
-                    mb = ebones.get(mname)
-                    if mb is not None and _is_def_bone(mb, stg.prefix_def):
-                        da_fare.append(mb)
-                        visti.add(mname)
-        # Radice per l'opzione parent="ROOT": primo bone senza genitore
-        root_ebone = next((eb for eb in ebones if eb.parent is None), None)
-        created = []
-        # Mappa DEF -> nome controller, serve per ricostruire la catena FK
-        def_to_ctrl_name = {}
-        # Il controller è un bone dell'armatura, non un oggetto: ricalca il DEF
-        for b in da_fare:
-            base_name = b.name[len(stg.prefix_def):] if b.name.startswith(stg.prefix_def) else b.name
-            name = (stg.prefix_ctrl or "") + base_name
-            # Caso limite: senza prefisso DEF il nome coinciderebbe con quello del DEF
-            if name == b.name:
-                name = "CTRL_" + base_name
-            ebone = ebones.get(name)
-            if ebone is None:
-                ebone = ebones.new(name)
-            ebone.head = b.head.copy()
-            if (b.tail - b.head).length > 1e-6:
-                ebone.tail = b.tail.copy()
-            else:
-                ebone.tail = b.head + Vector((0.0, 0.1, 0.0))
-            ebone.roll = b.roll
-            # I controller non devono mai deformare la mesh
-            ebone.use_deform = False
-            def_to_ctrl_name[b.name] = name
-            created.append((name, b.name))
-        # Secondo passaggio per il parent: "CHAIN" richiede che i controller
-        # esistano già tutti, altrimenti la catena non si chiude
-        for b in da_fare:
-            ebone = ebones.get(def_to_ctrl_name[b.name])
-            if ebone is None:
-                continue
-            if stg.parent == "DEF":
-                ebone.parent = b
-            elif stg.parent == "BONE":
-                ebone.parent = b.parent
-            elif stg.parent == "ROOT":
-                # I wrapper EditBone cambiano istanza: il confronto è per nome
-                ebone.parent = None if (root_ebone is not None and root_ebone.name == b.name) else root_ebone
-            elif stg.parent == "CHAIN":
-                # FK tra controller: il CTRL del figlio segue il CTRL del genitore
-                if b.parent is not None and b.parent.name in def_to_ctrl_name:
-                    ebone.parent = ebones.get(def_to_ctrl_name[b.parent.name])
-                else:
-                    ebone.parent = b.parent
-            elif stg.parent == "NONE":
-                ebone.parent = None
-        # ebones.new() puo' azzerare la selezione degli altri bone: si
-        # ripristina esplicitamente sui DEF elaborati, cosi' una generate
-        # successiva (senza rientrare a mano in Edit Mode) li ritrova
-        for b in da_fare:
-            eb = ebones.get(b.name)
-            if eb is None:
-                continue
-            eb.select = True
-            eb.select_head = True
-            eb.select_tail = True
+        created, def_to_ctrl_name = _create_ctrl_edit_bones(ebones, da_fare, stg)
+        _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg)
         bpy.ops.object.mode_set(mode='OBJECT')
-        # Le forme sono oggetti mesh usati solo come custom_shape dei pose bone
-        col = _ensure_collection()
-        # Tutti i controller generati finiscono nella bone collection "CTRL"
-        bcoll = arm.data.collections.get("CTRL")
-        if bcoll is None:
-            bcoll = arm.data.collections.new("CTRL")
-        # Palette colore in funzione dell'opzione del pannello
-        palette = {"RED": "THEME04", "GREEN": "THEME07", "BLUE": "THEME12"}.get(stg.color)
-        for name, def_name in created:
-            bone = arm.data.bones.get(name)
-            pbone = arm.pose.bones.get(name)
-            if pbone is None:
-                continue
-            # Shape condivisa per forma: ricalcolata a ogni generate, così un
-            # cambio di forma aggiorna anche i controller già esistenti
-            pbone.custom_shape = _get_or_create_shape(stg.shape, col)
-            pbone.custom_shape_scale_xyz = (stg.scale, stg.scale, stg.scale)
-            # Colore del controller (se scelto un colore non NONE)
-            if palette:
-                pbone.color.palette = palette
-            # Iscrizione alla bone collection "CTRL"
-            if bone is not None and bcoll.name not in (c.name for c in bone.collections):
-                bcoll.assign(bone)
-            _mark_generated(arm, name, def_name)
-        self.report({'INFO'}, tr("msg.created") + ": " + str(len(created)))
+        n_ctrl = _configure_ctrl_pose_bones(arm, created, stg)
+        self.report({'INFO'}, tr("msg.created") + ": " + str(n_ctrl))
         return {'FINISHED'}
 
 
@@ -515,7 +650,7 @@ class CTRLDEF_OT_remove(Operator):
 
 class CTRLDEF_OT_bind_actd(Operator):
     bl_idname = "ctrl_def.bind_actd"
-    bl_label = "Vincola DEF ai CTRL (ACTD)"
+    bl_label = tr("op.bind_actd")
     bl_options = {'REGISTER', 'UNDO'}
 
     def _apply_actd(self, context, stg):
@@ -601,7 +736,7 @@ class CTRLDEF_OT_bind_actd(Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         data = _read_registry(arm)
         if not data:
-            self.report({'ERROR'}, "Nessun controller registrato")
+            self.report({'ERROR'}, tr("msg.no_registered"))
             return {'CANCELLED'}
         res = self._apply_actd(context, stg)
         bound = 0
@@ -612,7 +747,7 @@ class CTRLDEF_OT_bind_actd(Operator):
             bound = self._apply_native(arm, data)
         if arm.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
-        self.report({'INFO'}, "Vincoli DEF/CTRL: " + str(bound))
+        self.report({'INFO'}, tr("msg.bound") + ": " + str(bound))
         return {'FINISHED'}
 
 

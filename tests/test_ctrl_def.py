@@ -101,6 +101,70 @@ def test_registration_elements():
     assert mod._mirror_name("DEF_hand.R") == "DEF_hand.L", \
         f"Mirror di DEF_hand.R: {mod._mirror_name('DEF_hand.R')!r} invece di 'DEF_hand.L'"
     assert mod._mirror_name("DEF_hand") == "DEF_hand", "Un nome centrale non deve essere specchiato"
+    # Localizzazione: le due lingue devono esistere e differire davvero
+    assert mod.tr("op.generate", "it") == "Genera Controller", \
+        f"tr('op.generate', 'it') inatteso: {mod.tr('op.generate', 'it')!r}"
+    assert mod.tr("op.generate", "en") == "Generate Controllers", \
+        f"tr('op.generate', 'en') inatteso: {mod.tr('op.generate', 'en')!r}"
+    # Chiavi aggiunte per le EnumProperty e i messaggi dell'operatore di bind
+    for chiave in ("msg.no_registered", "msg.bound", "shape.circle", "shape.cube",
+                   "shape.sphere", "shape.arrow", "shape.cross", "color.none",
+                   "color.red", "color.green", "color.blue", "parent.chain",
+                   "parent.chain_tip", "parent.bone", "parent.bone_tip",
+                   "parent.root", "parent.root_tip", "parent.none",
+                   "parent.none_tip", "parent.def", "parent.def_tip",
+                   "preset.default", "preset.biped", "preset.root", "preset.face"):
+        for lingua in ("it", "en"):
+            assert chiave in mod._I18N[lingua], f"Chiave {chiave!r} assente in _I18N[{lingua!r}]"
+    assert mod.tr("msg.no_registered", "it") == "Nessun controller registrato", \
+        f"msg.no_registered IT inatteso: {mod.tr('msg.no_registered', 'it')!r}"
+    assert mod.tr("msg.no_registered", "en") == "No registered controllers", \
+        f"msg.no_registered EN inatteso: {mod.tr('msg.no_registered', 'en')!r}"
+    # Callback delle EnumProperty: con items dinamici il default e' l'indice 0,
+    # quindi la prima voce deve restare quella storica di default.
+    assert mod._items_shape(None, None)[0][0] == "CIRCLE", \
+        f"Prima voce di _items_shape: {mod._items_shape(None, None)[0][0]!r} invece di 'CIRCLE'"
+    assert mod._items_color(None, None)[0][0] == "NONE", \
+        f"Prima voce di _items_color: {mod._items_color(None, None)[0][0]!r} invece di 'NONE'"
+    assert mod._items_parent(None, None)[0][0] == "CHAIN", \
+        f"Prima voce di _items_parent: {mod._items_parent(None, None)[0][0]!r} invece di 'CHAIN'"
+    assert mod._items_preset(None, None)[0][0] == "DEFAULT", \
+        f"Prima voce di _items_preset: {mod._items_preset(None, None)[0][0]!r} invece di 'DEFAULT'"
+    # Etichette delle callback in IT ed EN: si forza la lingua sostituendo tr()
+    _tr_reale = mod.tr
+
+    def _tr_forzato(lingua):
+        return lambda chiave, lang=None: _tr_reale(chiave, lingua)
+
+    try:
+        mod.tr = _tr_forzato("it")
+        voci_it = {voce[0]: voce[1] for voce in mod._items_shape(None, None)}
+        mod.tr = _tr_forzato("en")
+        voci_en = {voce[0]: voce[1] for voce in mod._items_shape(None, None)}
+    finally:
+        mod.tr = _tr_reale
+    assert voci_it.get("CIRCLE") == "Cerchio", f"_items_shape IT: {voci_it}"
+    assert voci_it.get("CUBE") == "Cubo", f"_items_shape IT (CUBE): {voci_it}"
+    assert voci_it.get("SPHERE") == "Sfera", f"_items_shape IT (SPHERE): {voci_it}"
+    assert voci_it.get("ARROW") == "Freccia", f"_items_shape IT (ARROW): {voci_it}"
+    assert voci_it.get("CROSS") == "Croce", f"_items_shape IT (CROSS): {voci_it}"
+    assert voci_en.get("CIRCLE") == "Circle", f"_items_shape EN: {voci_en}"
+    assert voci_en.get("CUBE") == "Cube", f"_items_shape EN (CUBE): {voci_en}"
+    assert voci_en.get("SPHERE") == "Sphere", f"_items_shape EN (SPHERE): {voci_en}"
+    assert voci_en.get("ARROW") == "Arrow", f"_items_shape EN (ARROW): {voci_en}"
+    assert voci_en.get("CROSS") == "Cross", f"_items_shape EN (CROSS): {voci_en}"
+    # Le altre callback espongono le stesse 5/4 voci attese
+    assert [v[0] for v in mod._items_color(None, None)] == ["NONE", "RED", "GREEN", "BLUE"], \
+        f"Voci di _items_color inattese: {[v[0] for v in mod._items_color(None, None)]}"
+    assert [v[0] for v in mod._items_parent(None, None)] == ["CHAIN", "BONE", "ROOT", "NONE", "DEF"], \
+        f"Voci di _items_parent inattese: {[v[0] for v in mod._items_parent(None, None)]}"
+    assert [v[0] for v in mod._items_preset(None, None)] == ["DEFAULT", "BIPED_LIMB", "ROOT_CTRL", "FACE"], \
+        f"Voci di _items_preset inattese: {[v[0] for v in mod._items_preset(None, None)]}"
+    # execute di generate scomposto in helper di modulo
+    for nome_helper in ("_collect_def_bones", "_create_ctrl_edit_bones",
+                        "_assign_ctrl_parents", "_configure_ctrl_pose_bones"):
+        assert callable(getattr(mod, nome_helper, None)), \
+            f"Helper di generazione {nome_helper} mancante o non chiamabile nel modulo"
 
 
 def test_naming_pulito_e_prefisso():

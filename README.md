@@ -1,3 +1,5 @@
+**🇬🇧 English | [🇮🇹 Italiano](README.it.md)**
+
 # CTRL_DEF — DEF Controller Auto
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
@@ -5,105 +7,106 @@
 [![Version](https://img.shields.io/badge/version-0.1.2-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 
-Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`), con gerarchia FK pulita, zero Dependency Cycle e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF).
+Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — clean FK hierarchy, zero Dependency Cycles and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF).
 
 | | |
 |---|---|
-| **Compatibilità** | **Blender 4.2 LTS — 5.2+** |
-| **Categoria** | **Rigging** |
-| **Versione** | **0.1.2** |
-| **Autore** | **Pierfrancesco Diodato** |
-| **Tipo** | Add-on (ZIP installabile o cartella) |
-| **Licenza** | GPL-3.0-or-later |
+| **Compatibility** | **Blender 4.2 LTS — 5.2+** |
+| **Category** | **Rigging** |
+| **Version** | **0.1.2** |
+| **Author** | **Pierfrancesco Diodato** |
+| **Type** | Add-on (installable ZIP or folder) |
+| **License** | GPL-3.0-or-later |
 
 ---
 
-## ⚡ Quick Start (in meno di 60 secondi — 4 passaggi)
+## ⚡ Quick Start (under 60 seconds — 4 steps)
 
-1. Seleziona l'armatura, entra in **Edit Mode** (`Tab`) e seleziona i bone con prefisso `DEF_`.
-2. Apri la Sidebar (`N`) → scheda **DEF Ctrl** e scegli un preset (es. *Arto Bipede (Cubo)*) o personalizza forma/colore/scala.
-3. Clicca **Genera Controller** (`ctrl_def.generate`): vengono creati i controller puliti (`hand.L`) in catena FK nella Bone Collection `"CTRL"`.
-4. Clicca **Vincola DEF ai CTRL (ACTD)** (`ctrl_def.bind_actd`): i bone `DEF_` copiano istantaneamente le trasformazioni dei controller in Pose Mode senza Dependency Cycle.
+1. Select the armature, enter **Edit Mode** (`Tab`) and select the bones with the `DEF_` prefix.
+2. Open the Sidebar (`N`) → **DEF Ctrl** tab and pick a preset (e.g. *Biped Arm (Cube)*) or customize shape, color and scale.
+3. Click **Generate Controllers** (`ctrl_def.generate`): clean controllers (`hand.L`) are created in an FK chain inside the `"CTRL"` Bone Collection.
+4. Click **Bind DEF to CTRL (ACTD)** (`ctrl_def.bind_actd`): the `DEF_` bones instantly copy the controller transforms in Pose Mode with no Dependency Cycle.
 
-> **Risultato:** ruoti `arm.L` in Pose Mode e `DEF_arm.L` lo segue in tempo reale — la mesh si deforma tramite i DEF, il controllo passa dai controller.
-
----
-
-## 🚀 Caratteristiche Principali
-
-- **Naming pulito di default**: i controller si chiamano come i bone DEF senza prefisso (`DEF_hand.L` → `hand.L`, standard Blender/Rigify); con il campo *Prefisso Controller* si ottiene il naming classico (es. `CTRL_` → `CTRL_hand.L`).
-- **Custom shape condivise per tipo** (`v0.1.2`): le forme wireframe sono oggetti condivisi (`CTRL_DEF_SHAPE_CIRCLE`, `CTRL_DEF_SHAPE_CUBE`, `CTRL_DEF_SHAPE_SPHERE`, `CTRL_DEF_SHAPE_ARROW`, `CTRL_DEF_SHAPE_CROSS`) — una sola mesh per tipo, riutilizzata da tutti i controller.
-- **Generazione istantanea**: controller identici per posizione, orientamento e roll ai rispettivi `DEF_`, con `use_deform = False` (non deformano la mesh).
-- **Gerarchia di default "Catena CTRL (FK)"**: ricrea l'albero FK tra i controller (`forearm.L` figlio di `arm.L`), rendendoli indipendenti dai DEF: **zero Dependency Cycle** con A.C.T.D., anche con parent `Root`.
-- **Bone Collection dedicata**: isola automaticamente tutti i controller nella collezione `"CTRL"`.
-- **Palette colori tematiche**: assegnazione rapida conforme al tema di Blender (Rosso, Verde, Blu).
-- **Parentela flessibile**: `Catena CTRL (FK)` (default), `Bone genitore`, `Root`, `Nessuno (Libero)` e `DEF stesso` — quest'ultimo **solo se i DEF non copiano i CTRL**, perché genera un Dependency Cycle con A.C.T.D.
-- **Vincolo DEF→CTRL in 1 click**: il pulsante **"Vincola DEF ai CTRL (ACTD)"** (`ctrl_def.bind_actd`) entra in Pose Mode, configura ed esegue automaticamente **A.C.T.D.** se installato (sorgente = controller, destinazione = `DEF_`); senza A.C.T.D. applica gli stessi constraint `COPY_TRANSFORMS` in modo nativo (fallback standalone) dal registro proprietario.
-- **Mirror L/R**: genera contemporaneamente la controparte specchiata (es. `.L` → `.R`), con preservazione dei separatori `_L`/`_R` nel mirror.
-- **Preset rapidi**: *Default*, *Arto Bipede*, *Root Controller*, *Faccia*.
-- **Registro JSON & rimozione pulita**: traccia ogni controller generato sull'armatura (`_ctrl_def_generated`), consentendo la rimozione totale e sicura (`ctrl_def.remove`) senza toccare il rig esistente.
+> **Result:** rotate `arm.L` in Pose Mode and `DEF_arm.L` follows in real time — the mesh deforms through the DEF bones, control lives on the controllers.
 
 ---
 
-## 📸 Anteprime (Screenshots & Demo GIF)
+## 🚀 Key Features
 
-| File | Contenuto |
+- **Clean naming by default**: controllers are named after the DEF bones without prefix (`DEF_hand.L` → `hand.L`, Blender/Rigify standard); the *Controller Prefix* field restores the classic naming (e.g. `CTRL_` → `CTRL_hand.L`).
+- **Shared custom shapes per type** (`v0.1.2`): wireframe shapes are shared objects (`CTRL_DEF_SHAPE_CIRCLE`, `CTRL_DEF_SHAPE_CUBE`, `CTRL_DEF_SHAPE_SPHERE`, `CTRL_DEF_SHAPE_ARROW`, `CTRL_DEF_SHAPE_CROSS`) — one mesh per type, reused by every controller.
+- **Instant generation**: controllers match the position, orientation and roll of their `DEF_` bones, with `use_deform = False` (they do not deform the mesh).
+- **Default hierarchy "CTRL Chain (FK)"**: rebuilds the FK tree between controllers (`forearm.L` child of `arm.L`), keeping them independent from the DEF bones: **zero Dependency Cycles** with A.C.T.D., even with a `Root` parent.
+- **Dedicated Bone Collection**: every controller is automatically isolated in the `"CTRL"` collection.
+- **Themed color palette**: quick assignment following the Blender theme (Red, Green, Blue).
+- **Flexible parenting**: `CTRL Chain (FK)` (default), `Parent Bone`, `Root`, `None (Free)` and `Same DEF` — the latter **only if the DEF bones do not copy the CTRL**, because it creates a Dependency Cycle with A.C.T.D.
+- **1-click DEF→CTRL constraint**: the **"Bind DEF to CTRL (ACTD)"** button (`ctrl_def.bind_actd`) switches to Pose Mode, configures and runs **A.C.T.D.** automatically when installed (source = controllers, destination = `DEF_`); without A.C.T.D. it applies the same `COPY_TRANSFORMS` constraints natively (standalone fallback) from the proprietary registry.
+- **L/R mirroring**: generates the mirrored counterpart at the same time (e.g. `.L` → `.R`), preserving the `_L`/`_R` separators.
+- **Quick presets**: *Default*, *Biped Arm*, *Root Controller*, *Face*.
+- **Bilingual IT/EN interface**: every label, panel and dropdown entry (`EnumProperty`) follows the Blender language preference, with automatic English fallback.
+- **JSON registry & clean removal**: tracks every generated controller on the armature (`_ctrl_def_generated`), enabling safe full removal (`ctrl_def.remove`) without touching the existing rig.
+
+---
+
+## 📸 Previews (Screenshots & Demo GIF)
+
+| File | Content |
 |---|---|
-| `docs/images/01_before_def_bones.png` | Armatura con i bone `DEF_` selezionati e il pannello **DEF Ctrl** aperto nella Sidebar (`N`). |
-| `docs/images/02_after_ctrl_generated.png` | Dopo **Genera Controller** con preset *Arto Bipede (Cubo/Rosso/Mirror)*: controller colorati in Pose Mode. |
-| `docs/images/demo.gif` | Demo animata: onda di rotazione sulla catena di controller generati. |
+| `docs/images/01_before_def_bones.png` | Armature with the `DEF_` bones selected and the **DEF Ctrl** panel open in the Sidebar (`N`). |
+| `docs/images/02_after_ctrl_generated.png` | After **Generate Controllers** with the *Biped Arm (Cube/Red/Mirror)* preset: colored controllers in Pose Mode. |
+| `docs/images/demo.gif` | Animated demo: rotation wave along the generated controller chain. |
 
-![Armatura con bone DEF selezionati e pannello DEF Ctrl](docs/images/01_before_def_bones.png)
+![Armature with DEF bones selected and the DEF Ctrl panel](docs/images/01_before_def_bones.png)
 
-*Figura 1 — Armatura con i bone `DEF_` selezionati (nomi e assi visibili) e il pannello **Controller DEF** aperto nella Sidebar (`N`) → scheda **DEF Ctrl**.*
+*Figure 1 — Armature with the `DEF_` bones selected (names and axes visible) and the **Controller DEF** panel open in the Sidebar (`N`) → **DEF Ctrl** tab.*
 
-![Controller generati in Pose Mode](docs/images/02_after_ctrl_generated.png)
+![Generated controllers in Pose Mode](docs/images/02_after_ctrl_generated.png)
 
-*Figura 2 — Dopo **Genera Controller** con preset **Arto Bipede** (Cubo/Rosso/Mirror): forme personalizzate condivise colorate in Pose Mode e box di stato aggiornato (`DEF trovati: 3 | CTRL generati: 3`).*
+*Figure 2 — After **Generate Controllers** with the **Biped Arm** preset (Cube/Red/Mirror): colored shared custom shapes in Pose Mode and updated status box (`DEF found: 3 | CTRL generated: 3`).*
 
-![Demo animata: rotazione della catena di controller](docs/images/demo.gif)
+![Animated demo: controller chain rotation](docs/images/demo.gif)
 
-*Figura 3 — Demo animata: onda di rotazione sulla catena di controller generati.*
+*Figure 3 — Animated demo: rotation wave along the generated controller chain.*
 
 ---
 
-## 🔄 Esempio Prima / Dopo (Nomi, Gerarchia e Attributi)
+## 🔄 Before / After Example (Names, Hierarchy and Attributes)
 
-Catena di esempio (braccio sinistro) con preset *Arto Bipede (Cubo)*:
+Sample chain (left arm) with the *Biped Arm (Cube)* preset:
 
-| Aspetto | Bone deformanti (prima) | Controller default (dopo) | Controller con prefisso opzionale (dopo) |
+| Aspect | Deform bones (before) | Default controllers (after) | Controllers with optional prefix (after) |
 |---|---|---|---|
-| **Nomi** | `DEF_arm.L` → `DEF_forearm.L` → `DEF_hand.L` | `arm.L` → `forearm.L` → `hand.L` | `CTRL_arm.L` → `CTRL_forearm.L` → `CTRL_hand.L` |
+| **Names** | `DEF_arm.L` → `DEF_forearm.L` → `DEF_hand.L` | `arm.L` → `forearm.L` → `hand.L` | `CTRL_arm.L` → `CTRL_forearm.L` → `CTRL_hand.L` |
 | **`use_deform`** | `True` | `False` | `False` |
-| **Bone Collection** | — (rig originale) | `CTRL` | `CTRL` |
-| **Custom shape** | — | `CTRL_DEF_SHAPE_CUBE` (condivisa) | `CTRL_DEF_SHAPE_CUBE` (condivisa) |
-| **Gerarchia** | Catena deformazione | Catena FK (`forearm.L` figlio di `arm.L`) | Catena FK (`CTRL_forearm.L` figlio di `CTRL_arm.L`) |
-| **Dependency Cycle con A.C.T.D.** | — | **Nessuno** | **Nessuno** |
+| **Bone Collection** | — (original rig) | `CTRL` | `CTRL` |
+| **Custom shape** | — | `CTRL_DEF_SHAPE_CUBE` (shared) | `CTRL_DEF_SHAPE_CUBE` (shared) |
+| **Hierarchy** | Deform chain | FK chain (`forearm.L` child of `arm.L`) | FK chain (`CTRL_forearm.L` child of `CTRL_arm.L`) |
+| **Dependency Cycle with A.C.T.D.** | — | **None** | **None** |
 
-I controller copiano posizione, orientamento e roll dei corrispondenti `DEF_`, ma non deformano la mesh (`use_deform = False`) e vivono nella Bone Collection dedicata `"CTRL"`.
-
----
-
-## 🔗 Sinergia con Auto Copy Transforms DEF (A.C.T.D.)
-
-CTRL_DEF è il complemento naturale di **A.C.T.D.** (Auto Copy Transforms DEF):
-
-1. Usa **CTRL_DEF** per creare i controller dell'armatura partendo dai bone `DEF_` (naming pulito, gerarchia FK, forme condivise).
-2. Clicca il pulsante 1-click **"Vincola DEF ai CTRL (ACTD)"** (`ctrl_def.bind_actd`):
-   - se **A.C.T.D.** è installato, CTRL_DEF entra in Pose Mode, ne configura le impostazioni (sorgente = controller, destinazione = `DEF_`) ed esegue la procedura automaticamente, senza intervento manuale;
-   - in uso **standalone** (A.C.T.D. assente), applica gli stessi constraint `COPY_TRANSFORMS` in modo nativo, leggendo il registro proprietario dei controller generati.
-
-I due addon operano in sinergia mantenendo registri e prefissi perfettamente isolati.
-
-**Verifica empirica (Blender 5.2 LTS):** con il default *Catena CTRL (FK)* e con parent *Root*, Blender riporta **0 dependency cycle**; ruotando `arm.L` di 30° e `hand.L` di 20°, `DEF_arm.L` segue con delta 0.0000°. (Evitare la parentela *DEF stesso* insieme ad A.C.T.D.: genera cicli.)
-
-**Repository A.C.T.D.:** https://github.com/PieroFra/auto-copy-transforms-def
+Controllers copy position, orientation and roll from their `DEF_` bones, but they do not deform the mesh (`use_deform = False`) and live in the dedicated `"CTRL"` Bone Collection.
 
 ---
 
-## 🧪 Procedura di Test Headless
+## 🔗 1-Click Synergy with Auto Copy Transforms DEF (A.C.T.D.)
 
-La suite `tests/test_ctrl_def.py` è eseguibile da terminale, su qualsiasi piattaforma, con ambiente Blender pulito (`--factory-startup`).
+CTRL_DEF is the natural companion of **A.C.T.D.** (Auto Copy Transforms DEF):
+
+1. Use **CTRL_DEF** to build the armature controllers from the `DEF_` bones (clean naming, FK hierarchy, shared shapes).
+2. Click the 1-click button **"Bind DEF to CTRL (ACTD)"** (`ctrl_def.bind_actd`):
+   - if **A.C.T.D.** is installed, CTRL_DEF switches to Pose Mode, configures its settings (source = controllers, destination = `DEF_`) and runs the procedure automatically, with no manual step;
+   - in **standalone** use (A.C.T.D. missing) it applies the same `COPY_TRANSFORMS` constraints natively, reading the proprietary registry of the generated controllers.
+
+Both add-ons work in synergy while keeping registries and prefixes fully isolated.
+
+**Empirical check (Blender 5.2 LTS):** with the default *CTRL Chain (FK)* and with a *Root* parent, Blender reports **0 dependency cycles**; rotating `arm.L` by 30° and `hand.L` by 20°, `DEF_arm.L` follows with a 0.0000° delta. (Avoid the *Same DEF* parenting together with A.C.T.D.: it creates cycles.)
+
+**A.C.T.D. repository:** https://github.com/PieroFra/auto-copy-transforms-def
+
+---
+
+## 🧪 Headless Test Suite
+
+The `tests/test_ctrl_def.py` suite runs from a terminal on any platform, with a clean Blender environment (`--factory-startup`).
 
 **Windows PowerShell:**
 
@@ -117,68 +120,72 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_tests.ps1
 ./scripts/run_tests.sh
 ```
 
-**Comando diretto Blender (qualsiasi OS):**
+**Direct Blender command (any OS):**
 
 ```bash
 blender --background --factory-startup --python scripts/run_ctrl_def_tests.py
 ```
 
-I runner stampano il verdetto della suite: `VERDETTO: OK passati=<n> falliti=0 totale=<n>` (exit code 0) oppure `VERDETTO: FAIL ...` (exit code 1). Ultimo esito locale su Blender 5.2.0 LTS: `passati=5 falliti=0 totale=5` (vedi `tests/test_out.txt`).
+The runners print the suite verdict: `VERDETTO: OK passati=<n> falliti=0 totale=<n>` (exit code 0) or `VERDETTO: FAIL ...` (exit code 1). Last local result on Blender 5.2.0 LTS: `passati=5 falliti=0 totale=5` (see `tests/test_out.txt`).
 
 ---
 
-## 📦 Creazione dello ZIP Installabile
+## 📦 Installable ZIP
 
-Il pacchetto installabile contiene esattamente 4 file alla radice dello ZIP (nessuna cartella contenitrice):
+The installable package contains exactly 5 files at the ZIP root (no wrapping folder):
 
 ```
 def_controller_auto_v0.1.2.zip
 ├── __init__.py
 ├── blender_manifest.toml
 ├── README.md
+├── README.it.md
 └── LICENSE
 ```
 
-**Da terminale (Windows PowerShell):**
+**From a terminal (Windows PowerShell):**
 
 ```powershell
-Compress-Archive -Path __init__.py, blender_manifest.toml, README.md, LICENSE -DestinationPath dist\def_controller_auto_v0.1.2.zip
+Compress-Archive -Path __init__.py, blender_manifest.toml, README.md, README.it.md, LICENSE -DestinationPath dist\def_controller_auto_v0.1.2.zip
 ```
 
-**In alternativa:** scarica direttamente il pacchetto (con file `.sha256` di verifica) dalla pagina [Releases](https://github.com/PieroFra/def-controller-auto/releases).
+**Alternatively:** download the package directly (with its `.sha256` checksum file) from the [Releases](https://github.com/PieroFra/def-controller-auto/releases) page.
 
-**Installazione in Blender:** *Modifica > Preferenze > Componenti aggiuntivi > Installa da disco...*, seleziona lo ZIP (o la cartella estratta), attiva **DEF Controller Auto** e trova il pannello nella **Sidebar 3D (tasto `N`) → scheda "DEF Ctrl"**.
+**Installing in Blender:** *Edit > Preferences > Add-ons > Install from Disk...*, select the ZIP (or the extracted folder), enable **DEF Controller Auto** and find the panel in the **3D Sidebar (`N` key) → "DEF Ctrl" tab**.
 
 ---
 
 ## ⚠️ Known Limitations & Roadmap (`v0.2.0`)
 
-- Attualmente supporta catene **FK** (IK/FK switch automatico previsto in `v0.2.0`).
-- In `v0.2.0` è prevista la modularizzazione interna (`properties.py`, `registry.py`, `shapes.py`, `generation.py`, `binding.py`, `panel.py`) con build step verso il monolite.
-- La verifica automatizzata copre la generazione, il naming, la gerarchia FK, i preset, il bind A.C.T.D. e gli elementi di registrazione; la UI completa resta soggetta a verifica interattiva manuale.
+- Currently supports **FK** chains only (automatic IK/FK switch planned for `v0.2.0`).
+- `v0.2.0` will introduce internal modularization (`properties.py`, `registry.py`, `shapes.py`, `generation.py`, `binding.py`, `panel.py`) with a build step towards the monolith.
+- Automated verification covers generation, naming, FK hierarchy, presets, A.C.T.D. binding and registry entries; the full UI still needs manual interactive verification.
 
 ---
 
 ## 📋 Changelog
 
 ### `v0.1.2`
-- Custom shape condivise per tipo (`CTRL_DEF_SHAPE_*`): una sola mesh per forma, riutilizzata da tutti i controller.
-- Etichette UI compatte senza troncamento IT/EN.
-- Preservazione separatori `_L`/`_R` nel mirror.
-- Script di test multipiattaforma (`scripts/run_tests.ps1` e `.sh`).
-- Screenshot/GIF prive di splash screen.
-- 10 nuovi test sui casi limite.
+- Shared custom shapes per type (`CTRL_DEF_SHAPE_*`): one mesh per shape, reused by every controller.
+- Full dynamic IT/EN localization: labels, panels and buttons follow the Blender language, with automatic English fallback (`tr()`).
+- Dynamic localization extended to the **dropdown menus** (`EnumProperty`): shape, color, parenting and presets use `_items_*` callbacks that re-translate the entries on every panel draw.
+- Internal split of the generation operator into helper functions (`_collect_def_bones`, `_create_ctrl_edit_bones`, `_assign_ctrl_parents`, `_configure_ctrl_pose_bones`) for a more readable and testable flow.
+- Compact UI labels with no IT/EN truncation.
+- `_L`/`_R` separator preservation in mirroring.
+- Cross-platform test scripts (`scripts/run_tests.ps1` and `.sh`).
+- Screenshots/GIF free of the splash screen.
+- 10 new edge-case tests.
 
 ### `v0.1.1`
-- Naming pulito senza prefisso di default.
-- Gerarchia `Catena CTRL (FK)` a zero Dependency Cycle.
-- Operatore 1-click `ctrl_def.bind_actd`.
+- Clean naming without a default prefix.
+- `CTRL Chain (FK)` hierarchy with zero Dependency Cycles.
+- 1-click `ctrl_def.bind_actd` operator.
 
 ### `v0.1.0`
-- Release iniziale MVP.
+- Initial MVP release.
 
 ---
 
-## 📄 Licenza
+## 📄 License
 
-GPL-3.0-or-later — vedi il file [LICENSE](LICENSE).
+GPL-3.0-or-later — see the [LICENSE](LICENSE) file.
