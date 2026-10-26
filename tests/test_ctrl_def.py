@@ -165,6 +165,33 @@ def test_registration_elements():
                         "_assign_ctrl_parents", "_configure_ctrl_pose_bones"):
         assert callable(getattr(mod, nome_helper, None)), \
             f"Helper di generazione {nome_helper} mancante o non chiamabile nel modulo"
+    # Builder geometrici puri, dispatcher, preset, remove e draw helpers
+    for nome_helper in ("_make_cube", "_make_sphere", "_make_arrow", "_make_cross",
+                        "_shape_geometry", "_apply_preset_values",
+                        "_remove_registered_bones", "_draw_stats_box",
+                        "_draw_preset_box", "_draw_settings", "_draw_actions",
+                        "_purge_unused_shapes", "_ensure_armature_mode",
+                        "_configure_actd_settings", "_count_actd_bindings_for_arm",
+                        "_apply_native_bindings", "_register_class_safe",
+                        "_unregister_class_safe"):
+        assert callable(getattr(mod, nome_helper, None)), \
+            f"Helper {nome_helper} mancante o non chiamabile nel modulo"
+    # register() deve essere idempotente: una seconda chiamata non tocca
+    # Scene.ctrl_def_settings, che deve restare usabile
+    mod.register()
+    assert hasattr(bpy.types.Scene, "ctrl_def_settings"), \
+        "Scene.ctrl_def_settings sparito dopo una seconda chiamata a register()"
+    stg_dopo = bpy.context.scene.ctrl_def_settings
+    assert stg_dopo is not None, "Scene.ctrl_def_settings non accessibile dopo register() ripetuto"
+    assert stg_dopo.prefix_def == "DEF_", \
+        f"prefix_def alterato da register() ripetuto: {stg_dopo.prefix_def!r}"
+    for forma in ("CIRCLE", "CUBE", "SPHERE", "ARROW", "CROSS"):
+        geometria = mod._shape_geometry(forma, 1.0)
+        assert isinstance(geometria, tuple) and len(geometria) == 2, \
+            f"_shape_geometry('{forma}') non restituisce la coppia (verts, edges): {geometria!r}"
+        verts, edges = geometria
+        assert len(verts) > 0, f"_shape_geometry('{forma}') senza vertici"
+        assert len(edges) > 0, f"_shape_geometry('{forma}') senza spigoli"
 
 
 def test_naming_pulito_e_prefisso():
