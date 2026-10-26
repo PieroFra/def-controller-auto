@@ -1,3 +1,6 @@
+# NON MODIFICARE DIRETTAMENTE.
+# Generato automaticamente da scripts\build_monolith.py: edita i moduli in ctrl_def_mods\ e ricostruisci.
+
 bl_info = {
     "name": "DEF Controller Auto",
     "author": "Pierfrancesco Diodato",

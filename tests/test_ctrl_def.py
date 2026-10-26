@@ -192,6 +192,20 @@ def test_registration_elements():
         verts, edges = geometria
         assert len(verts) > 0, f"_shape_geometry('{forma}') senza vertici"
         assert len(edges) > 0, f"_shape_geometry('{forma}') senza spigoli"
+    # Architettura Moduli + Build Step: lo script di build e i 9 moduli
+    # devono esistere su disco accanto al monolite generato
+    radice_addon = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+    percorso_build = os.path.join(radice_addon, "scripts", "build_monolith.py")
+    assert os.path.isfile(percorso_build), f"Script di build mancante: {percorso_build}"
+    moduli_attesi = ("ctrl_def_header.py", "ctrl_def_i18n.py", "ctrl_def_registry.py",
+                     "ctrl_def_shapes.py", "ctrl_def_properties.py",
+                     "ctrl_def_generation.py", "ctrl_def_operators.py",
+                     "ctrl_def_ui.py", "ctrl_def_main.py")
+    assert len(moduli_attesi) == 9, f"Elenco dei moduli inatteso: {len(moduli_attesi)} voci"
+    for nome_modulo in moduli_attesi:
+        percorso_modulo = os.path.join(radice_addon, "ctrl_def_mods", nome_modulo)
+        assert os.path.isfile(percorso_modulo), f"Modulo dell'addon mancante: {percorso_modulo}"
 
 
 def test_naming_pulito_e_prefisso():
