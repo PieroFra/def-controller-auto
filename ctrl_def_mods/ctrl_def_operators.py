@@ -8,6 +8,7 @@ import bpy
 from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper, ImportHelper
+from mathutils import Vector
 
 from .ctrl_def_i18n import tr
 from .ctrl_def_registry import _forget_generated, _read_registry
@@ -499,6 +500,145 @@ class CTRLDEF_OT_load_preset(Operator, ImportHelper):
             return {'CANCELLED'}
         _apply_settings_values(context.scene.ctrl_def_settings, valori)
         self.report({'INFO'}, tr("msg.loaded") + ": " + self.filepath)
+        return {'FINISHED'}
+
+
+# ===========================================================================
+# Target IK rapido sui controller selezionati (Fase E)
+# ===========================================================================
+def _pose_bone_selected(pbone):
+    """Stato di selezione del controller, con fallback tra versioni Blender.
+
+    Da Blender 5.0 la selezione vive sul pose bone; nelle versioni precedenti
+    (4.2 - 4.5) resta sulla copia Bone dell'armatura. In headless i due stati
+    possono divergere: si accetta la selezione se e' attiva su almeno uno dei
+    due, cosi' la catena resta leggibile in Pose Mode su Blender 5.x.
+    """
+    if hasattr(pbone, "select") and pbone.select:
+        return True
+    return pbone.bone.select
+
+
+def _selected_ctrl_chains(arm):
+    """Catene di 2-3 controller registrati selezionati in Pose Mode.
+
+    Un anello vale solo se e' registrato, se ha un genitore registrato e se
+    entrambi sono selezionati: la catena si legge risalendo dal bone
+    selezionato, cosi' la selezione completa di una catena produce una sola
+    voce. Restituisce una lista di catene ordinate genitore -> figlio.
+    """
+    registro = _read_registry(arm)
+    if not registro:
+        return []
+
+    def selezionato(nome):
+        """Selezione letta sul pose bone del nome indicato."""
+        pb = arm.pose.bones.get(nome)
+        return pb is not None and _pose_bone_selected(pb)
+
+    selezione = [pb for pb in arm.pose.bones
+                 if pb.name in registro and _pose_bone_selected(pb)]
+    catene = []
+    for pb in selezione:
+        catena = [pb.name]
+        genitore = pb.bone.parent
+        while (genitore is not None and genitore.name in registro
+               and selezionato(genitore.name)):
+            catena.insert(0, genitore.name)
+            genitore = genitore.parent
+        if 2 <= len(catena) <= 3 and catena not in catene:
+            catene.append(catena)
+    # Solo catene massimali: un prefisso piu' corto della stessa catena
+    # riscriverebbe il constraint IK gia' creato sul primo controller.
+    return [c for c in catene
+            if not any(len(o) > len(c) and o[:len(c)] == c for o in catene)]
+
+
+def _add_ik_target_chain(arm, bcoll_name, chain, pole=False):
+    """Crea il target IK della catena e il vincolo IK sul primo controller.
+
+    Il target e' un bone non-deform libero, col roll dell'ultimo controller,
+    assegnato alla bone collection indicata; il constraint vive sul primo
+    controller e chiude il loop su chain_count anelli. Restituisce il numero
+    di target creati.
+    """
+    if arm is None or arm.type != 'ARMATURE' or not chain:
+        return 0
+    if arm.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode='EDIT')
+    ebones = arm.data.edit_bones
+    ultimo = ebones.get(chain[-1])
+    if ultimo is None:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return 0
+    bcoll = arm.data.collections.get(bcoll_name)
+    if bcoll is None:
+        bcoll = arm.data.collections.new(bcoll_name)
+    nomi = ["IK_" + chain[-1]]
+    if pole:
+        nomi.append("IK_" + chain[-1] + "_pole")
+    creati = 0
+    for nome in nomi:
+        ebone = ebones.get(nome)
+        if ebone is None:
+            ebone = ebones.new(nome)
+        ebone.head = ultimo.head.copy()
+        # Stessa guardia zero-length dei controller generati
+        if (ultimo.tail - ultimo.head).length > 1e-6:
+            ebone.tail = ultimo.tail.copy()
+        else:
+            ebone.tail = ultimo.head + Vector((0.0, 0.1, 0.0))
+        ebone.roll = ultimo.roll
+        ebone.use_deform = False
+        ebone.parent = None
+        bcoll.assign(ebone)
+        creati += 1
+    bpy.ops.object.mode_set(mode='OBJECT')
+    pbone = arm.pose.bones.get(chain[0])
+    if pbone is None:
+        return creati
+    con = pbone.constraints.get("CTRL_DEF_IK")
+    if con is not None and con.type != 'IK':
+        pbone.constraints.remove(con)
+        con = None
+    if con is None:
+        con = pbone.constraints.new('IK')
+    con.name = "CTRL_DEF_IK"
+    con.target = arm
+    con.subtarget = "IK_" + chain[-1]
+    con.chain_count = len(chain)
+    con.use_tail = True
+    if pole:
+        con.pole_target = arm
+        con.pole_subtarget = "IK_" + chain[-1] + "_pole"
+    return creati
+
+
+class CTRLDEF_OT_add_ik(Operator):
+    bl_idname = "ctrl_def.add_ik"
+    bl_label = tr("op.add_ik")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        arm = context.active_object
+        if arm is None or arm.type != "ARMATURE":
+            self.report({'ERROR'}, tr("msg.no_armature"))
+            return {'CANCELLED'}
+        # La selezione dei bone si legge solo in Pose Mode
+        _ensure_armature_mode(context, arm, 'POSE')
+        # La selezione scritta dai test/pannelli va consolidata prima della lettura
+        context.view_layer.update()
+        catene = _selected_ctrl_chains(arm)
+        if not catene:
+            _ensure_armature_mode(context, arm, 'OBJECT')
+            self.report({'ERROR'}, tr("msg.no_ik_chain"))
+            return {'CANCELLED'}
+        creati = 0
+        for catena in catene:
+            creati += _add_ik_target_chain(arm, "CTRL", catena)
+        _ensure_armature_mode(context, arm, 'OBJECT')
+        self.report({'INFO'}, tr("msg.ik_created") + ": " + str(creati))
         return {'FINISHED'}
 
 

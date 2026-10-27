@@ -39,6 +39,13 @@ def _draw_settings(layout, stg):
     layout.separator()
 
 
+def _draw_ik_box(layout):
+    """Target IK rapido sui controller selezionati (Fase E)."""
+    box = layout.box()
+    box.label(text=tr("panel.ik"), icon='CONSTRAINT')
+    box.operator("ctrl_def.add_ik", text=tr("op.add_ik"), icon='CONSTRAINT')
+
+
 def _draw_export_box(layout):
     """Export della mappa CTRL->DEF e preset utente su file."""
     box = layout.box()
@@ -72,6 +79,7 @@ class CTRLDEF_PT_panel(Panel):
             _draw_stats_box(layout, arm, stg)
         _draw_preset_box(layout, stg)
         _draw_settings(layout, stg)
+        _draw_ik_box(layout)
         _draw_export_box(layout)
         _draw_actions(layout)
 

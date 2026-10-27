@@ -62,6 +62,25 @@ def _build_chain(arm_data):
     _add_bone(arm_data, "DEF_hand.L", (0.0, 0.0, 2.0), (0.0, 0.0, 2.2), "DEF_forearm.L")
 
 
+def _seleziona_posa(arm_obj, nomi=None, stato=True):
+    """Imposta la selezione dei pose bone con fallback tra versioni Blender.
+
+    Da Blender 5.0 la selezione vive sul pose bone; in 4.x resta sul Bone.
+    Si impostano entrambi gli stati perche' in headless il pose bone puo'
+    non riflettere la copia Bone (e viceversa). Con nomi=None agisce su tutti
+    i pose bone dell'armatura.
+    """
+    if nomi is None:
+        bersagli = list(arm_obj.pose.bones)
+    else:
+        bersagli = [arm_obj.pose.bones[nm] for nm in nomi]
+    for pbone in bersagli:
+        if hasattr(pbone, "select"):
+            pbone.select = stato
+        pbone.bone.select = stato
+    bpy.context.view_layer.update()
+
+
 def _walk_up(bone):
     """Risale la gerarchia restituendo la lista dei nomi visitati."""
     names = []
@@ -518,6 +537,46 @@ def test_bind_actd_rotazione():
         if os.path.isfile(percorso):
             os.remove(percorso)
     os.rmdir(cartella)
+
+    # Fase E: target IK rapido sulla catena di 3 controller arm.L ->
+    # forearm.L -> hand.L gia' generata sopra (parent CHAIN).
+    bpy.ops.object.mode_set(mode='POSE')
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        assert pbone is not None, f"Controller {nm} assente prima di add_ik"
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    bone_ik = arm_data.bones.get("IK_hand.L")
+    assert bone_ik is not None, "Target IK_hand.L non creato da add_ik"
+    assert bone_ik.use_deform is False, "Il target IK non deve deformare la mesh"
+    assert arm_data.bones.get("IK_hand.L_pole") is None, \
+        "Target pole creato senza richiesta (pole=False)"
+    con_ik = arm_obj.pose.bones["arm.L"].constraints.get("CTRL_DEF_IK")
+    assert con_ik is not None, "Constraint CTRL_DEF_IK mancante sul primo controller arm.L"
+    assert con_ik.type == 'IK', f"Constraint CTRL_DEF_IK di tipo {con_ik.type!r} invece di 'IK'"
+    assert con_ik.target == arm_obj, "Il constraint IK deve puntare all'armatura stessa"
+    assert con_ik.subtarget == "IK_hand.L", \
+        f"subtarget del constraint IK: {con_ik.subtarget!r} invece di 'IK_hand.L'"
+    assert con_ik.chain_count == 3, \
+        f"chain_count del constraint IK: {con_ik.chain_count} invece di 3"
+    assert con_ik.use_tail is True, "use_tail del constraint IK non attivo"
+    # Nessun controller selezionato: l'operatore rifiuta l'operazione
+    bpy.ops.object.mode_set(mode='POSE')
+    _seleziona_posa(arm_obj, None, False)
+    res_ik_vuoto = bpy.ops.ctrl_def.add_ik()
+    assert res_ik_vuoto == {'CANCELLED'}, \
+        f"add_ik senza controller selezionati: {res_ik_vuoto} invece di {{'CANCELLED'}}"
+    # Una catena di 2 anelli (forearm.L -> hand.L) e' supportata
+    bpy.ops.object.mode_set(mode='POSE')
+    _seleziona_posa(arm_obj, ("forearm.L", "hand.L"), True)
+    res_ik_due = bpy.ops.ctrl_def.add_ik()
+    assert res_ik_due == {'FINISHED'}, f"add_ik su catena di 2 anelli: {res_ik_due}"
+    con_ik_due = arm_obj.pose.bones["forearm.L"].constraints.get("CTRL_DEF_IK")
+    assert con_ik_due is not None, "Constraint CTRL_DEF_IK mancante su forearm.L (catena di 2)"
+    assert con_ik_due.chain_count == 2, \
+        f"chain_count della catena di 2: {con_ik_due.chain_count} invece di 2"
+    bpy.ops.object.mode_set(mode='OBJECT')
 
 
 def test_presets():

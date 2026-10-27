@@ -3,7 +3,8 @@ import bpy
 from bpy.props import PointerProperty
 
 from .ctrl_def_generation import CTRLDEF_OT_generate
-from .ctrl_def_operators import (CTRLDEF_OT_apply_preset, CTRLDEF_OT_bind_actd,
+from .ctrl_def_operators import (CTRLDEF_OT_add_ik, CTRLDEF_OT_apply_preset,
+                                 CTRLDEF_OT_bind_actd,
                                  CTRLDEF_OT_diagnose, CTRLDEF_OT_export_csv,
                                  CTRLDEF_OT_export_json, CTRLDEF_OT_load_preset,
                                  CTRLDEF_OT_remove, CTRLDEF_OT_save_preset)
@@ -18,6 +19,7 @@ _classes = [
     CTRLDEF_OT_apply_preset,
     CTRLDEF_OT_generate,
     CTRLDEF_OT_diagnose,
+    CTRLDEF_OT_add_ik,
     CTRLDEF_OT_export_json,
     CTRLDEF_OT_export_csv,
     CTRLDEF_OT_save_preset,

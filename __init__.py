@@ -36,13 +36,14 @@ if __package__:
         CTRLDEF_OT_generate, _assign_ctrl_parents, _collect_def_bones,
         _configure_ctrl_pose_bones, _create_ctrl_edit_bones)
     from .ctrl_def_mods.ctrl_def_operators import (
-        _PRESETS, CTRLDEF_OT_apply_preset, CTRLDEF_OT_bind_actd,
+        _PRESETS, CTRLDEF_OT_add_ik, CTRLDEF_OT_apply_preset,
+        CTRLDEF_OT_bind_actd,
         CTRLDEF_OT_diagnose, CTRLDEF_OT_export_csv, CTRLDEF_OT_export_json,
         CTRLDEF_OT_load_preset, CTRLDEF_OT_remove, CTRLDEF_OT_save_preset,
-        _apply_native_bindings, _apply_preset_values,
+        _add_ik_target_chain, _apply_native_bindings, _apply_preset_values,
         _configure_actd_settings, _count_actd_bindings_for_arm,
         _diagnose_def_selection, _ensure_armature_mode, _export_rows,
-        _purge_unused_shapes, _remove_registered_bones)
+        _purge_unused_shapes, _remove_registered_bones, _selected_ctrl_chains)
     from .ctrl_def_mods.ctrl_def_ui import (
         CTRLDEF_PT_panel, _draw_actions, _draw_preset_box, _draw_settings,
         _draw_stats_box)
@@ -65,13 +66,14 @@ else:
         CTRLDEF_OT_generate, _assign_ctrl_parents, _collect_def_bones,
         _configure_ctrl_pose_bones, _create_ctrl_edit_bones)
     from ctrl_def_mods.ctrl_def_operators import (
-        _PRESETS, CTRLDEF_OT_apply_preset, CTRLDEF_OT_bind_actd,
+        _PRESETS, CTRLDEF_OT_add_ik, CTRLDEF_OT_apply_preset,
+        CTRLDEF_OT_bind_actd,
         CTRLDEF_OT_diagnose, CTRLDEF_OT_export_csv, CTRLDEF_OT_export_json,
         CTRLDEF_OT_load_preset, CTRLDEF_OT_remove, CTRLDEF_OT_save_preset,
-        _apply_native_bindings, _apply_preset_values,
+        _add_ik_target_chain, _apply_native_bindings, _apply_preset_values,
         _configure_actd_settings, _count_actd_bindings_for_arm,
         _diagnose_def_selection, _ensure_armature_mode, _export_rows,
-        _purge_unused_shapes, _remove_registered_bones)
+        _purge_unused_shapes, _remove_registered_bones, _selected_ctrl_chains)
     from ctrl_def_mods.ctrl_def_ui import (
         CTRLDEF_PT_panel, _draw_actions, _draw_preset_box, _draw_settings,
         _draw_stats_box)
