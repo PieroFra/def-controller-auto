@@ -1,4 +1,8 @@
-# MODULO ctrl_def_shapes.py — naming, mirror L/R e geometria delle custom shape (intestazione di build, non fa parte del monolite)
+# Modulo shape: naming, mirror L/R e geometria delle custom shape.
+import math
+
+import bpy
+
 # ===========================================================================
 # Utilità naming, L/R, shape
 # ===========================================================================

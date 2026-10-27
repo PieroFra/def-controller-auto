@@ -32,9 +32,14 @@ def main():
         print("ERRORE: file attesi non trovati: {} / {}".format(addon_path, tests_path))
         return 1
 
-    # Carica e registra l'addon (single-file __init__.py) prima dei test
+    # Carica e registra l'addon prima dei test. La registrazione in
+    # sys.modules DEVE avvenire PRIMA di exec_module: gli __init__.py dei
+    # package multi-modulo e i test leggono "ctrl_def_addon" da sys.modules
+    # durante l'esecuzione, altrimenti la suite fallisce con
+    # ModuleNotFoundError quando l'addon viene caricato come singolo modulo.
     addon_spec = importlib.util.spec_from_file_location("ctrl_def_addon", addon_path)
     addon_mod = importlib.util.module_from_spec(addon_spec)
+    sys.modules["ctrl_def_addon"] = addon_mod
     addon_spec.loader.exec_module(addon_mod)
     addon_mod.register()
 

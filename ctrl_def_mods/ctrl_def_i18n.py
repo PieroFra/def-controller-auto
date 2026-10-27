@@ -1,4 +1,6 @@
-# MODULO ctrl_def_i18n.py — tabelle _I18N e funzione tr (intestazione di build, non fa parte del monolite)
+# Modulo I18N: tabelle IT/EN e funzione tr().
+import bpy
+
 # ===========================================================================
 # Internazionalizzazione (IT / EN)
 # ===========================================================================
@@ -9,6 +11,7 @@ _I18N = {
         "panel.prefix_ctrl": "CTRL",
         "panel.shape": "Forma",
         "panel.scale": "Scala",
+        "panel.shape_rot": "Rotazione Shape",
         "panel.color": "Colore",
         "panel.parent": "Genitore",
         "panel.mirror": "Mirror L/R",
@@ -20,12 +23,15 @@ _I18N = {
         "op.bind_actd": "Vincola DEF ai CTRL (ACTD)",
         "op.remove": "Rimuovi Generati",
         "op.apply_preset": "Applica Preset",
+        "op.diagnose": "Diagnostica Rig",
         "msg.created": "Controller creati",
         "msg.removed": "Controller rimossi",
         "msg.no_armature": "Nessuna armatura attiva",
         "msg.no_def_bones": "Nessun bone DEF selezionato",
         "msg.no_registered": "Nessun controller registrato",
         "msg.bound": "Vincoli DEF/CTRL",
+        "msg.diag_ok": "Diagnostica OK: nessun problema rilevato",
+        "msg.diag_issues": "Problemi rilevati",
         # Voci delle EnumProperty (callback _items_shape/_items_color/...)
         "shape.circle": "Cerchio",
         "shape.cube": "Cubo",
@@ -57,6 +63,7 @@ _I18N = {
         "panel.prefix_ctrl": "CTRL",
         "panel.shape": "Shape",
         "panel.scale": "Scale",
+        "panel.shape_rot": "Shape Rotation",
         "panel.color": "Color",
         "panel.parent": "Parent",
         "panel.mirror": "Mirror L/R",
@@ -67,12 +74,15 @@ _I18N = {
         "op.bind_actd": "Bind DEF to CTRL (ACTD)",
         "op.remove": "Remove Generated",
         "op.apply_preset": "Apply Preset",
+        "op.diagnose": "Diagnose Rig",
         "msg.created": "Controllers created",
         "msg.removed": "Controllers removed",
         "msg.no_armature": "No active armature",
         "msg.no_def_bones": "No DEF bones selected",
         "msg.no_registered": "No registered controllers",
         "msg.bound": "DEF/CTRL bindings",
+        "msg.diag_ok": "Diagnostics OK: no issues found",
+        "msg.diag_issues": "Issues found",
         "shape.circle": "Circle",
         "shape.cube": "Cube",
         "shape.sphere": "Sphere",

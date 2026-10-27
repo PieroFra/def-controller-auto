@@ -1,4 +1,8 @@
-# MODULO ctrl_def_registry.py — registro JSON dei controller generati (intestazione di build, non fa parte del monolite)
+# Modulo registro: JSON dei controller generati sull'armatura.
+import json
+
+import bpy
+
 # ===========================================================================
 # Registro JSON sull'oggetto armatura (tracciamento controller generati)
 # ===========================================================================

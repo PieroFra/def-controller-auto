@@ -1,4 +1,10 @@
-# MODULO ctrl_def_properties.py — callback EnumProperty e PropertyGroup delle impostazioni (intestazione di build, non fa parte del monolite)
+# Modulo proprieta': callback EnumProperty e PropertyGroup delle impostazioni.
+from bpy.props import (BoolProperty, EnumProperty, FloatProperty,
+                       FloatVectorProperty, StringProperty)
+from bpy.types import PropertyGroup
+
+from .ctrl_def_i18n import tr
+
 # ===========================================================================
 # Voci delle EnumProperty (callback: etichette tradotte a ogni disegno)
 # ===========================================================================
@@ -63,6 +69,13 @@ class CTRLDEF_PG_settings(PropertyGroup):
         items=_items_shape)
     scale: FloatProperty(
         name=tr("panel.scale"), default=1.0, min=0.01)
+    # Rotazione locale della custom shape in gradi (Euler XYZ): orienta anelli e
+    # frecce lungo l'asse del bone senza ruotare la mesh condivisa.
+    shape_rot: FloatVectorProperty(
+        name=tr("panel.shape_rot"),
+        subtype='EULER',
+        size=3,
+        default=(0.0, 0.0, 0.0))
     # Default = prima voce della callback: NONE
     color: EnumProperty(
         name=tr("panel.color"),

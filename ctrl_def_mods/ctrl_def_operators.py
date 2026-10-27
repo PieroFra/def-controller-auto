@@ -1,14 +1,26 @@
-# MODULO ctrl_def_operators.py — preset, rimozione e binding ACTD (intestazione di build, non fa parte del monolite)
+# Modulo operatori: preset, rimozione, binding ACTD e diagnostica pre-flight.
+import json
+
+import bpy
+from bpy.types import Operator
+
+from .ctrl_def_i18n import tr
+from .ctrl_def_registry import _forget_generated, _read_registry
+from .ctrl_def_shapes import _is_def_bone, _mirror_name
 
 _PRESETS = {
     "DEFAULT": {"shape": "CIRCLE", "scale": 1.0, "color": "NONE",
-                "parent": "CHAIN", "mirror": False},
+                "parent": "CHAIN", "mirror": False,
+                "shape_rot": (0.0, 0.0, 0.0)},
     "BIPED_LIMB": {"shape": "CUBE", "scale": 0.8, "color": "RED",
-                   "parent": "CHAIN", "mirror": True},
+                   "parent": "CHAIN", "mirror": True,
+                   "shape_rot": (0.0, 0.0, 0.0)},
     "ROOT_CTRL": {"shape": "ARROW", "scale": 2.0, "color": "BLUE",
-                  "parent": "ROOT", "mirror": False},
+                  "parent": "ROOT", "mirror": False,
+                  "shape_rot": (90.0, 0.0, 0.0)},
     "FACE": {"shape": "SPHERE", "scale": 0.3, "color": "GREEN",
-             "parent": "BONE", "mirror": True},
+             "parent": "BONE", "mirror": True,
+             "shape_rot": (90.0, 0.0, 0.0)},
 }
 
 
@@ -225,6 +237,73 @@ class CTRLDEF_OT_bind_actd(Operator):
         if arm.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         self.report({'INFO'}, tr("msg.bound") + ": " + str(bound))
+        return {'FINISHED'}
+
+
+# ===========================================================================
+# Diagnostica Pre-Flight (Fase B)
+# ===========================================================================
+def _diagnose_def_selection(arm, stg):
+    """Ispeziona i bone DEF prima della generazione.
+
+    Funziona in Edit Mode (edit_bones) e in Object/Pose Mode (bones).
+    Restituisce un dizionario con:
+    - zero_length: bone DEF con lunghezza <= 1e-6;
+    - missing_mirror: controparti specchiate mancanti con stg.mirror attivo;
+    - name_collisions: controller che collidono con bone non-DEF non registrati;
+    - parent_def_cycle: True se stg.parent == "DEF" (rischio Dependency Cycle).
+    """
+    bones = arm.data.edit_bones if arm.mode == 'EDIT' else arm.data.bones
+    nomi = {b.name for b in bones}
+    registro = _read_registry(arm)
+    zero_length = []
+    missing_mirror = []
+    name_collisions = []
+    for b in bones:
+        if not _is_def_bone(b, stg.prefix_def):
+            continue
+        if b.length <= 1e-6:
+            zero_length.append(b.name)
+        if stg.mirror:
+            mname = _mirror_name(b.name)
+            if mname != b.name and mname not in nomi and mname not in missing_mirror:
+                missing_mirror.append(mname)
+        # Stesso calcolo del nome controller usato dalla generazione
+        base_name = b.name[len(stg.prefix_def):] if b.name.startswith(stg.prefix_def) else b.name
+        ctrl_name = (stg.prefix_ctrl or "") + base_name
+        if ctrl_name == b.name:
+            ctrl_name = "CTRL_" + base_name
+        if (ctrl_name in nomi and not _is_def_bone(bones[ctrl_name], stg.prefix_def)
+                and ctrl_name not in registro and ctrl_name not in name_collisions):
+            name_collisions.append(ctrl_name)
+    return {
+        "zero_length": zero_length,
+        "missing_mirror": missing_mirror,
+        "name_collisions": name_collisions,
+        "parent_def_cycle": stg.parent == "DEF",
+    }
+
+
+class CTRLDEF_OT_diagnose(Operator):
+    bl_idname = "ctrl_def.diagnose"
+    bl_label = tr("op.diagnose")
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        arm = context.active_object
+        if arm is None or arm.type != "ARMATURE":
+            self.report({'ERROR'}, tr("msg.no_armature"))
+            return {'CANCELLED'}
+        stg = context.scene.ctrl_def_settings
+        diagnosi = _diagnose_def_selection(arm, stg)
+        arm["_ctrl_def_last_diagnosis"] = json.dumps(diagnosi)
+        totale = (len(diagnosi["zero_length"]) + len(diagnosi["missing_mirror"])
+                  + len(diagnosi["name_collisions"])
+                  + (1 if diagnosi["parent_def_cycle"] else 0))
+        if totale == 0:
+            self.report({'INFO'}, tr("msg.diag_ok"))
+        else:
+            self.report({'WARNING'}, tr("msg.diag_issues") + ": " + str(totale))
         return {'FINISHED'}
 
 

@@ -1,4 +1,15 @@
-# MODULO ctrl_def_generation.py — helper e operatore di generazione dei controller (intestazione di build, non fa parte del monolite)
+# Modulo generazione: helper e operatore di creazione dei controller.
+import math
+
+import bpy
+from mathutils import Vector
+from bpy.types import Operator
+
+from .ctrl_def_i18n import tr
+from .ctrl_def_registry import _mark_generated
+from .ctrl_def_shapes import (_ensure_collection, _get_or_create_shape,
+                              _is_def_bone, _mirror_name)
+
 # ===========================================================================
 # Helper della generazione controller (usati da CTRLDEF_OT_generate)
 # ===========================================================================
@@ -128,6 +139,11 @@ def _configure_ctrl_pose_bones(arm, created, stg):
         # cambio di forma aggiorna anche i controller già esistenti
         pbone.custom_shape = _get_or_create_shape(stg.shape, col)
         pbone.custom_shape_scale_xyz = (stg.scale, stg.scale, stg.scale)
+        # Rotazione locale della shape in radianti (Blender usa i radianti)
+        if hasattr(pbone, "custom_shape_rotation_euler"):
+            rot = stg.shape_rot
+            pbone.custom_shape_rotation_euler = (
+                math.radians(rot[0]), math.radians(rot[1]), math.radians(rot[2]))
         # Colore del controller (se scelto un colore non NONE)
         if palette:
             pbone.color.palette = palette

@@ -1,4 +1,13 @@
-# MODULO ctrl_def_main.py — registrazione delle classi e blocco di avvio (intestazione di build, non fa parte del monolite)
+# Modulo main: registrazione delle classi e blocco di avvio.
+import bpy
+from bpy.props import PointerProperty
+
+from .ctrl_def_generation import CTRLDEF_OT_generate
+from .ctrl_def_operators import (CTRLDEF_OT_apply_preset, CTRLDEF_OT_bind_actd,
+                                 CTRLDEF_OT_diagnose, CTRLDEF_OT_remove)
+from .ctrl_def_properties import CTRLDEF_PG_settings
+from .ctrl_def_ui import CTRLDEF_PT_panel
+
 # ===========================================================================
 # Registrazione
 # ===========================================================================
@@ -6,6 +15,7 @@ _classes = [
     CTRLDEF_PG_settings,
     CTRLDEF_OT_apply_preset,
     CTRLDEF_OT_generate,
+    CTRLDEF_OT_diagnose,
     CTRLDEF_OT_bind_actd,
     CTRLDEF_OT_remove,
     CTRLDEF_PT_panel,

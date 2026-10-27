@@ -1,4 +1,10 @@
-# MODULO ctrl_def_ui.py — pannello sidebar e helper di disegno (intestazione di build, non fa parte del monolite)
+# Modulo UI: pannello della sidebar e helper di disegno.
+from bpy.types import Panel
+
+from .ctrl_def_i18n import tr
+from .ctrl_def_registry import _read_registry
+from .ctrl_def_shapes import _is_def_bone
+
 # ===========================================================================
 # Panel sidebar (N)
 # ===========================================================================
@@ -26,6 +32,7 @@ def _draw_settings(layout, stg):
     layout.prop(stg, "prefix_ctrl", text=tr("panel.prefix_ctrl"))
     layout.prop(stg, "shape", text=tr("panel.shape"))
     layout.prop(stg, "scale", text=tr("panel.scale"))
+    layout.prop(stg, "shape_rot", text=tr("panel.shape_rot"))
     layout.prop(stg, "color", text=tr("panel.color"))
     layout.prop(stg, "parent", text=tr("panel.parent"))
     layout.prop(stg, "mirror", text=tr("panel.mirror"))
@@ -35,6 +42,7 @@ def _draw_settings(layout, stg):
 def _draw_actions(layout):
     """Pulsanti delle operazioni principali."""
     layout.operator("ctrl_def.generate", text=tr("op.generate"), icon='BONE_DATA')
+    layout.operator("ctrl_def.diagnose", text=tr("op.diagnose"), icon='VIEWZOOM')
     layout.operator("ctrl_def.bind_actd", text=tr("op.bind_actd"), icon='CONSTRAINT_BONE')
     layout.operator("ctrl_def.remove", text=tr("op.remove"), icon='TRASH')
 

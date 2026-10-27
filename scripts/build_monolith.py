@@ -1,50 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Build del monolite CTRL_DEF (architettura Moduli + Build Step).
+"""Verifica del package CTRL_DEF (architettura Moduli + Build Step).
 
 Uso:
-    python scripts/build_monolith.py build    -> assembla i moduli nel monolite
+    python scripts/build_monolith.py build
 
-Regole di build:
-- nessuna riga dei moduli viene modificata;
-- ogni modulo inizia con una riga di intestazione "# MODULO ..." (italiano),
-  scartata in fase di build;
-- il monolite generato inizia sempre con HEADER_GENERATO (commenti "non
-  modificare"), aggiunto dalla build e assente nei moduli;
-- nessun import aggiunto ai moduli.
-
-Ordine di concatenamento esplicito in ORDINE_MODULI: non dipende dal nome dei
-file ne' dal contenuto della cartella.
+La fonte di verita' sono i moduli in ctrl_def_mods/*.py; __init__.py e' l'entry
+point installabile che li importa. La build non concatena piu' nulla: controlla
+versione, presenza dei moduli e compilazione del package.
 
 Semantica dell'exit code (letta da .opencode/scripts/verify.ps1):
-    0 -> il monolite era gia' allineato ai moduli (IN_SYNC)
-    1 -> il monolite era disallineato ed e' stato rigenerato (REBUILT)
-    2 -> errore di build (versione incoerente, moduli mancanti, ...)
+    0 -> package allineato e compilabile (IN_SYNC)
+    2 -> errore di verifica (versione incoerente, modulo mancante, sintassi)
 """
 
-import hashlib
 import os
 import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MONOLITH = os.path.join(ROOT, "__init__.py")
+ENTRY = os.path.join(ROOT, "__init__.py")
 MODS_DIR = os.path.join(ROOT, "ctrl_def_mods")
-HEADER_MARK = "# MODULO "
-HEADER_END = " (intestazione di build, non fa parte del monolite)"
+PACKAGE_INIT = os.path.join(MODS_DIR, "__init__.py")
+VERSION_MANIFEST = os.path.join(ROOT, "blender_manifest.toml")
 
-# Intestazione generata automaticamente: e' sempre la prima parte del monolite
-# e non risiede in nessun modulo (cosi' non la si puo' editare per errore).
-HEADER_GENERATO = (
-    r"# NON MODIFICARE DIRETTAMENTE." "\n"
-    r"# Generato automaticamente da scripts\build_monolith.py: edita i moduli "
-    r"in ctrl_def_mods\ e ricostruisci." "\n"
-    "\n"
-)
-
-# Ordine di concatenamento dei moduli logici.
+# Moduli funzionali del package, nell'ordine logico di import.
 ORDINE_MODULI = [
-    "ctrl_def_header.py",
     "ctrl_def_i18n.py",
     "ctrl_def_registry.py",
     "ctrl_def_shapes.py",
@@ -54,10 +35,6 @@ ORDINE_MODULI = [
     "ctrl_def_ui.py",
     "ctrl_def_main.py",
 ]
-
-# Fonti della versione: bl_info in ctrl_def_header.py e blender_manifest.toml.
-VERSION_MANIFEST = os.path.join(ROOT, "blender_manifest.toml")
-MODULO_HEADER = os.path.join(MODS_DIR, "ctrl_def_header.py")
 
 
 def errore(messaggio):
@@ -80,25 +57,14 @@ def leggi_percorso(percorso):
         errore("impossibile leggere %s (%s)." % (percorso, exc))
 
 
-def scrivi_percorso(percorso, testo):
-    """Scrive un file come testo utf-8 senza alterarne il contenuto."""
-    with open(percorso, "w", encoding="utf-8", newline="") as f:
-        f.write(testo)
-
-
-def hash_testo(testo):
-    """Restituisce l'impronta SHA256 del testo codificato in utf-8."""
-    return hashlib.sha256(testo.encode("utf-8")).hexdigest()
-
-
-def leggi_versione_header():
-    """Estrae la tupla "version" da bl_info in ctrl_def_header.py."""
-    testo = leggi_percorso(MODULO_HEADER)
+def leggi_versione_entry():
+    """Estrae la tupla "version" da bl_info in __init__.py."""
+    testo = leggi_percorso(ENTRY)
     corrispondenza = re.search(
         r'"version"\s*:\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)', testo
     )
     if corrispondenza is None:
-        errore('campo "version" assente in ctrl_def_header.py.')
+        errore('campo "version" assente in __init__.py.')
     return tuple(int(gruppo) for gruppo in corrispondenza.groups())
 
 
@@ -115,66 +81,52 @@ def leggi_versione_manifest():
 
 def verifica_versione():
     """Confronta la versione di bl_info e quella del manifest prima della build."""
-    versione_header = leggi_versione_header()
+    versione_entry = leggi_versione_entry()
     versione_manifest = leggi_versione_manifest()
-    if versione_header != versione_manifest:
+    if versione_entry != versione_manifest:
         errore(
-            "versione incoerente: ctrl_def_header ha %s, blender_manifest.toml "
+            "versione incoerente: __init__.py ha %s, blender_manifest.toml "
             "ha %s. Allinea bl_info e manifest."
-            % (formatta_versione(versione_header), formatta_versione(versione_manifest))
+            % (formatta_versione(versione_entry), formatta_versione(versione_manifest))
         )
-    print("Versione coerente: %s" % formatta_versione(versione_header))
-    return versione_header
+    return versione_entry
+
+
+def verifica_modulo(percorso):
+    """Compila il modulo senza scrivere .pyc e segnala gli errori di sintassi."""
+    try:
+        compile(leggi_percorso(percorso), percorso, "exec")
+    except SyntaxError as exc:
+        errore("sintassi non valida in %s: %s (riga %s)."
+               % (percorso, exc.msg, exc.lineno))
 
 
 def elenca_moduli():
-    """Elenca i file dei moduli nell'ordine esplicito di concatenamento."""
+    """Elenca i moduli funzionali, verificando presenza e compilazione."""
+    if not os.path.isfile(PACKAGE_INIT):
+        errore("package mancante: %s." % PACKAGE_INIT)
+    verifica_modulo(PACKAGE_INIT)
     percorsi = []
     for nome in ORDINE_MODULI:
         percorso = os.path.join(MODS_DIR, nome)
         if not os.path.isfile(percorso):
             errore("modulo mancante: %s." % percorso)
+        verifica_modulo(percorso)
         percorsi.append(percorso)
     return percorsi
 
 
-def assembla():
-    """Assembla i moduli nell'ordine dichiarato, scartando le intestazioni.
-
-    Il risultato inizia sempre con HEADER_GENERATO, che non proviene dai moduli:
-    la build e' quindi deterministica e ripetibile.
-    """
-    parti = [HEADER_GENERATO]
-    for percorso in elenca_moduli():
-        testo = leggi_percorso(percorso)
-        if testo.startswith(HEADER_MARK):
-            taglio = testo.find("\n")
-            testo = testo[taglio + 1:] if taglio >= 0 else ""
-        parti.append(testo)
-    return "".join(parti)
-
-
 def build():
-    """Verifica la versione, assembla i moduli e riscrive il monolite."""
-    verifica_versione()
+    """Verifica versione, presenza e compilazione dei moduli del package."""
+    versione = verifica_versione()
     percorsi = elenca_moduli()
-    if not percorsi:
-        errore("nessun modulo in %s." % MODS_DIR)
-    impronta_originale = hash_testo(leggi_percorso(MONOLITH))
-    testo = assembla()
-    impronta_nuova = hash_testo(testo)
-    scrivi_percorso(MONOLITH, testo)
+    print("Versione coerente: %s" % formatta_versione(versione))
     print("Moduli assemblati: %d" % len(percorsi))
     for percorso in percorsi:
         contenuto = leggi_percorso(percorso)
         print("  %-34s %5d righe" % (os.path.basename(percorso), contenuto.count("\n")))
-    print("Hash monolite precedente: %s" % impronta_originale)
-    print("Hash monolite rigenerato: %s" % impronta_nuova)
-    if impronta_nuova == impronta_originale:
-        print("Build: OK (byte-identico)")
-        return 0
-    print("Build: monolite rigenerato dai moduli.")
-    return 1
+    print("Build: OK (IN_SYNC)")
+    return 0
 
 
 def main(argomenti):

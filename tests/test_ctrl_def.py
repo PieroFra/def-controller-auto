@@ -9,7 +9,7 @@ import os
 import sys
 from mathutils import Vector
 
-# Percorso dell'addon (single file __init__.py) per il caricamento diretto
+# Percorso dell'addon (entry point del package) per il caricamento diretto
 _PATH_ADDON = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "__init__.py"))
 
@@ -79,6 +79,7 @@ def test_registration_elements():
     assert hasattr(bpy.ops.ctrl_def, "generate"), "Operatore ctrl_def.generate mancante"
     assert hasattr(bpy.ops.ctrl_def, "remove"), "Operatore ctrl_def.remove mancante"
     assert hasattr(bpy.ops.ctrl_def, "bind_actd"), "Operatore ctrl_def.bind_actd mancante"
+    assert hasattr(bpy.ops.ctrl_def, "diagnose"), "Operatore ctrl_def.diagnose mancante"
     assert hasattr(bpy.types.Scene, "ctrl_def_settings"), "Scene.ctrl_def_settings mancante"
     stg = bpy.context.scene.ctrl_def_settings
     assert stg.prefix_ctrl == "", f"prefix_ctrl deve essere vuoto di default, trovato {stg.prefix_ctrl!r}"
@@ -113,13 +114,22 @@ def test_registration_elements():
                    "parent.chain_tip", "parent.bone", "parent.bone_tip",
                    "parent.root", "parent.root_tip", "parent.none",
                    "parent.none_tip", "parent.def", "parent.def_tip",
-                   "preset.default", "preset.biped", "preset.root", "preset.face"):
+                   "preset.default", "preset.biped", "preset.root", "preset.face",
+                   "op.diagnose", "msg.diag_ok", "msg.diag_issues"):
         for lingua in ("it", "en"):
             assert chiave in mod._I18N[lingua], f"Chiave {chiave!r} assente in _I18N[{lingua!r}]"
     assert mod.tr("msg.no_registered", "it") == "Nessun controller registrato", \
         f"msg.no_registered IT inatteso: {mod.tr('msg.no_registered', 'it')!r}"
     assert mod.tr("msg.no_registered", "en") == "No registered controllers", \
         f"msg.no_registered EN inatteso: {mod.tr('msg.no_registered', 'en')!r}"
+    assert mod.tr("op.diagnose", "it") == "Diagnostica Rig", \
+        f"op.diagnose IT inatteso: {mod.tr('op.diagnose', 'it')!r}"
+    assert mod.tr("op.diagnose", "en") == "Diagnose Rig", \
+        f"op.diagnose EN inatteso: {mod.tr('op.diagnose', 'en')!r}"
+    assert mod.tr("msg.diag_ok", "it") == "Diagnostica OK: nessun problema rilevato", \
+        f"msg.diag_ok IT inatteso: {mod.tr('msg.diag_ok', 'it')!r}"
+    assert mod.tr("msg.diag_issues", "en") == "Issues found", \
+        f"msg.diag_issues EN inatteso: {mod.tr('msg.diag_issues', 'en')!r}"
     # Callback delle EnumProperty: con items dinamici il default e' l'indice 0,
     # quindi la prima voce deve restare quella storica di default.
     assert mod._items_shape(None, None)[0][0] == "CIRCLE", \
@@ -131,18 +141,20 @@ def test_registration_elements():
     assert mod._items_preset(None, None)[0][0] == "DEFAULT", \
         f"Prima voce di _items_preset: {mod._items_preset(None, None)[0][0]!r} invece di 'DEFAULT'"
     # Etichette delle callback in IT ed EN: si forza la lingua sostituendo tr()
-    _tr_reale = mod.tr
+    # nello spazio dei nomi del modulo che definisce _items_shape (package).
+    _globs_props = mod._items_shape.__globals__
+    _tr_reale = _globs_props["tr"]
 
     def _tr_forzato(lingua):
         return lambda chiave, lang=None: _tr_reale(chiave, lingua)
 
     try:
-        mod.tr = _tr_forzato("it")
+        _globs_props["tr"] = _tr_forzato("it")
         voci_it = {voce[0]: voce[1] for voce in mod._items_shape(None, None)}
-        mod.tr = _tr_forzato("en")
+        _globs_props["tr"] = _tr_forzato("en")
         voci_en = {voce[0]: voce[1] for voce in mod._items_shape(None, None)}
     finally:
-        mod.tr = _tr_reale
+        _globs_props["tr"] = _tr_reale
     assert voci_it.get("CIRCLE") == "Cerchio", f"_items_shape IT: {voci_it}"
     assert voci_it.get("CUBE") == "Cubo", f"_items_shape IT (CUBE): {voci_it}"
     assert voci_it.get("SPHERE") == "Sfera", f"_items_shape IT (SPHERE): {voci_it}"
@@ -173,7 +185,7 @@ def test_registration_elements():
                         "_purge_unused_shapes", "_ensure_armature_mode",
                         "_configure_actd_settings", "_count_actd_bindings_for_arm",
                         "_apply_native_bindings", "_register_class_safe",
-                        "_unregister_class_safe"):
+                        "_unregister_class_safe", "_diagnose_def_selection"):
         assert callable(getattr(mod, nome_helper, None)), \
             f"Helper {nome_helper} mancante o non chiamabile nel modulo"
     # register() deve essere idempotente: una seconda chiamata non tocca
@@ -192,20 +204,30 @@ def test_registration_elements():
         verts, edges = geometria
         assert len(verts) > 0, f"_shape_geometry('{forma}') senza vertici"
         assert len(edges) > 0, f"_shape_geometry('{forma}') senza spigoli"
-    # Architettura Moduli + Build Step: lo script di build e i 9 moduli
-    # devono esistere su disco accanto al monolite generato
+    # Architettura Moduli + Package: lo script di build e gli 8 moduli
+    # funzionali devono esistere su disco accanto all'entry point __init__.py
     radice_addon = os.path.abspath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
     percorso_build = os.path.join(radice_addon, "scripts", "build_monolith.py")
     assert os.path.isfile(percorso_build), f"Script di build mancante: {percorso_build}"
-    moduli_attesi = ("ctrl_def_header.py", "ctrl_def_i18n.py", "ctrl_def_registry.py",
+    percorso_package = os.path.join(radice_addon, "ctrl_def_mods", "__init__.py")
+    assert os.path.isfile(percorso_package), f"Package ctrl_def_mods mancante: {percorso_package}"
+    moduli_attesi = ("ctrl_def_i18n.py", "ctrl_def_registry.py",
                      "ctrl_def_shapes.py", "ctrl_def_properties.py",
                      "ctrl_def_generation.py", "ctrl_def_operators.py",
                      "ctrl_def_ui.py", "ctrl_def_main.py")
-    assert len(moduli_attesi) == 9, f"Elenco dei moduli inatteso: {len(moduli_attesi)} voci"
+    assert len(moduli_attesi) == 8, f"Elenco dei moduli inatteso: {len(moduli_attesi)} voci"
     for nome_modulo in moduli_attesi:
         percorso_modulo = os.path.join(radice_addon, "ctrl_def_mods", nome_modulo)
         assert os.path.isfile(percorso_modulo), f"Modulo dell'addon mancante: {percorso_modulo}"
+    # L'entry point resta leggero: bl_info vive qui e non in un modulo header
+    percorso_entry = os.path.join(radice_addon, "__init__.py")
+    with open(percorso_entry, "r", encoding="utf-8") as file_entry:
+        righe_entry = file_entry.readlines()
+    assert len(righe_entry) < 120, \
+        f"__init__.py deve restare un entry point leggero: {len(righe_entry)} righe"
+    assert not os.path.isfile(os.path.join(radice_addon, "ctrl_def_mods", "ctrl_def_header.py")), \
+        "ctrl_def_header.py non deve piu' esistere: bl_info vive nell'entry point"
 
 
 def test_naming_pulito_e_prefisso():
@@ -272,6 +294,22 @@ def test_naming_pulito_e_prefisso():
     reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
     assert reg.get("arm_L", {}).get("def") == "DEF_arm_L", f"Registry errato per arm_L: {reg}"
     assert reg.get("arm_R", {}).get("def") == "DEF_arm_R", f"Registry errato per arm_R: {reg}"
+
+    # 5. Orientamento della custom shape: gradi nella UI, radianti nel pose bone
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.shape_rot = (90.0, 0.0, 0.0)
+    arm_obj, arm_data = _new_armature("RigShapeRot")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_hand.L", (0.0, 0.0, 1.0), (0.0, 0.5, 1.0))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione con shape_rot fallita: {res}"
+    eul = arm_obj.pose.bones["hand.L"].custom_shape_rotation_euler
+    atteso = (math.radians(90.0), 0.0, 0.0)
+    for i, (got, exp) in enumerate(zip(eul, atteso)):
+        assert abs(got - exp) < 1e-5, \
+            f"custom_shape_rotation_euler[{i}] = {got} invece di {exp} (rotazione in radianti attesa)"
 
 
 def test_parent_chain_fk():
@@ -422,12 +460,12 @@ def test_presets():
     _reset()
     stg = bpy.context.scene.ctrl_def_settings
     attesi = {
-        "DEFAULT": ("CIRCLE", 1.0, "NONE", "CHAIN", False),
-        "BIPED_LIMB": ("CUBE", 0.8, "RED", "CHAIN", True),
-        "ROOT_CTRL": ("ARROW", 2.0, "BLUE", "ROOT", False),
-        "FACE": ("SPHERE", 0.3, "GREEN", "BONE", True),
+        "DEFAULT": ("CIRCLE", 1.0, "NONE", "CHAIN", False, (0.0, 0.0, 0.0)),
+        "BIPED_LIMB": ("CUBE", 0.8, "RED", "CHAIN", True, (0.0, 0.0, 0.0)),
+        "ROOT_CTRL": ("ARROW", 2.0, "BLUE", "ROOT", False, (90.0, 0.0, 0.0)),
+        "FACE": ("SPHERE", 0.3, "GREEN", "BONE", True, (90.0, 0.0, 0.0)),
     }
-    for nome, (shape, scale, color, parent, mirror) in attesi.items():
+    for nome, (shape, scale, color, parent, mirror, rot) in attesi.items():
         stg.preset = nome
         res = bpy.ops.ctrl_def.apply_preset()
         assert res == {'FINISHED'}, f"apply_preset fallito per {nome}: {res}"
@@ -436,6 +474,78 @@ def test_presets():
         assert stg.color == color, f"Preset {nome}: color {stg.color!r} invece di {color!r}"
         assert stg.parent == parent, f"Preset {nome}: parent {stg.parent!r} invece di {parent!r}"
         assert stg.mirror is mirror, f"Preset {nome}: mirror {stg.mirror} invece di {mirror}"
+        for i in range(3):
+            assert abs(stg.shape_rot[i] - rot[i]) < 1e-4, \
+                f"Preset {nome}: shape_rot[{i}] = {stg.shape_rot[i]} invece di {rot[i]}"
+
+    # Fase B: Diagnostica Pre-Flight (ctrl_def.diagnose + _diagnose_def_selection)
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    mod = _addon_module()
+    assert callable(getattr(mod, "_diagnose_def_selection", None)), \
+        "Helper _diagnose_def_selection mancante o non chiamabile nel modulo"
+
+    # Caso pulito: coppia DEF_arm.L/.R completa, parent CHAIN, nessuna collisione
+    arm_obj, arm_data = _new_armature("RigDiagPulita")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "DEF_arm.R", (0.0, 0.0, -1.0), (0.0, 0.0, -1.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["zero_length"] == [], f"Bone sani segnalati come lunghezza zero: {diag}"
+    assert diag["missing_mirror"] == [], f"Specchiate mancanti in una coppia completa: {diag}"
+    assert diag["name_collisions"] == [], f"Collisioni inesistenti segnalate: {diag}"
+    assert diag["parent_def_cycle"] is False, f"parent_def_cycle inatteso: {diag}"
+    res = bpy.ops.ctrl_def.diagnose()
+    assert res == {'FINISHED'}, f"ctrl_def.diagnose fallito: {res}"
+    salvata = json.loads(arm_obj["_ctrl_def_last_diagnosis"])
+    assert salvata == diag, f"Riepilogo JSON diverso dalla diagnosi: {salvata} != {diag}"
+
+    # Mirror=True con .R mancante: va segnalata solo la controparte assente
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.mirror = True
+    arm_obj, arm_data = _new_armature("RigDiagMirror")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["missing_mirror"] == ["DEF_arm.R"], \
+        f"Controparte mancante attesa ['DEF_arm.R'], trovata {diag['missing_mirror']}"
+    # In Edit Mode la diagnosi legge edit_bones e deve dare lo stesso esito
+    bpy.ops.object.mode_set(mode='EDIT')
+    diag_edit = mod._diagnose_def_selection(arm_obj, stg)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    assert diag_edit == diag, f"Diagnosi diversa in Edit Mode: {diag_edit} != {diag}"
+
+    # Collisione: esiste gia' un bone "arm.L" non-DEF e non registrato
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    arm_obj, arm_data = _new_armature("RigDiagCollisione")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "arm.L", (0.0, 0.0, 2.0), (0.0, 0.0, 2.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["name_collisions"] == ["arm.L"], \
+        f"Collisione attesa ['arm.L'], trovata {diag['name_collisions']}"
+    # Un controller gia' registrato non e' una collisione
+    mod._mark_generated(arm_obj, "arm.L", "DEF_arm.L")
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["name_collisions"] == [], \
+        f"Un controller registrato non deve risultare in collisione: {diag['name_collisions']}"
+    mod._forget_generated(arm_obj, "arm.L")
+
+    # Parent "DEF": rischio Dependency Cycle segnalato anche nel riepilogo JSON
+    stg.parent = "DEF"
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["parent_def_cycle"] is True, f"parent='DEF' non segnalato: {diag}"
+    res = bpy.ops.ctrl_def.diagnose()
+    assert res == {'FINISHED'}, f"ctrl_def.diagnose fallito con parent DEF: {res}"
+    salvata = json.loads(arm_obj["_ctrl_def_last_diagnosis"])
+    assert salvata["parent_def_cycle"] is True, f"Riepilogo JSON senza parent_def_cycle: {salvata}"
+    assert salvata["name_collisions"] == ["arm.L"], \
+        f"Riepilogo JSON senza la collisione attesa: {salvata}"
 
 
 def _registra_addon_se_mancante():
