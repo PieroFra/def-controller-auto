@@ -37,7 +37,11 @@ def main():
     # package multi-modulo e i test leggono "ctrl_def_addon" da sys.modules
     # durante l'esecuzione, altrimenti la suite fallisce con
     # ModuleNotFoundError quando l'addon viene caricato come singolo modulo.
-    addon_spec = importlib.util.spec_from_file_location("ctrl_def_addon", addon_path)
+    # Si carica come package reale: __init__.py usa solo import relativi e non
+    # modifica sys.path (vietato dalla policy delle Blender Extensions), quindi
+    # il percorso lo prepara questo runner.
+    addon_spec = importlib.util.spec_from_file_location(
+        "ctrl_def_addon", addon_path, submodule_search_locations=[repo_root])
     addon_mod = importlib.util.module_from_spec(addon_spec)
     sys.modules["ctrl_def_addon"] = addon_mod
     addon_spec.loader.exec_module(addon_mod)

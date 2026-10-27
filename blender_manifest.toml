@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "ctrl_def"
-version = "0.1.2"
+version = "0.2.0"
 name = "DEF Controller Auto"
 tagline = "Generazione automatica di controller per bone DEF"
 maintainer = "Pierfrancesco Diodato"

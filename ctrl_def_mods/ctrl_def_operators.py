@@ -11,22 +11,22 @@ from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Vector
 
 from .ctrl_def_i18n import tr
-from .ctrl_def_registry import _forget_generated, _read_registry
-from .ctrl_def_shapes import _is_def_bone, _mirror_name
+from .ctrl_def_registry import (_forget_generated, _prune_registry,
+                                _read_registry)
+from .ctrl_def_shapes import (_bonewidget_available, _bonewidget_create,
+                              _is_def_bone, _mirror_name)
 
+# Preset rapidi dei controller: solo valori ancora posseduti dalle impostazioni
+# (il colore lo gestisce Bone Widget, la rotazione pure).
 _PRESETS = {
-    "DEFAULT": {"shape": "CIRCLE", "scale": 1.0, "color": "NONE",
-                "parent": "CHAIN", "mirror": False,
-                "shape_rot": (0.0, 0.0, 0.0)},
-    "BIPED_LIMB": {"shape": "CUBE", "scale": 0.8, "color": "RED",
-                   "parent": "CHAIN", "mirror": True,
-                   "shape_rot": (0.0, 0.0, 0.0)},
-    "ROOT_CTRL": {"shape": "ARROW", "scale": 2.0, "color": "BLUE",
-                  "parent": "ROOT", "mirror": False,
-                  "shape_rot": (90.0, 0.0, 0.0)},
-    "FACE": {"shape": "SPHERE", "scale": 0.3, "color": "GREEN",
-             "parent": "BONE", "mirror": True,
-             "shape_rot": (90.0, 0.0, 0.0)},
+    "DEFAULT": {"widget_name": "Circle", "scale": 1.0,
+                "parent": "CHAIN", "mirror": False},
+    "BIPED_LIMB": {"widget_name": "Cube", "scale": 0.8,
+                   "parent": "CHAIN", "mirror": True},
+    "ROOT_CTRL": {"widget_name": "Arrow", "scale": 2.0,
+                  "parent": "ROOT", "mirror": False},
+    "FACE": {"widget_name": "Sphere", "scale": 0.3,
+             "parent": "BONE", "mirror": True},
 }
 
 
@@ -45,37 +45,74 @@ class CTRLDEF_OT_apply_preset(Operator):
     bl_label = tr("op.apply_preset")
     bl_options = {'REGISTER', 'UNDO'}
 
+    @classmethod
+    def description(cls, context, properties):
+        # Tooltip dinamico: segue la lingua attiva a ogni passaggio del mouse.
+        return tr("tip.op.apply_preset")
+
     def execute(self, context):
         stg = context.scene.ctrl_def_settings
         _apply_preset_values(stg, stg.preset)
         return {'FINISHED'}
 
 
-def _remove_registered_bones(arm, data):
-    """Rimuove in Edit Mode i bone registrati e li dimentica dal registry.
+def _remove_ctrl_constraints(arm, nomi_rimossi):
+    """Toglie dai pose bone superstiti i constraint che puntano ai controller
+    rimossi, compresi i target IK e i COPY_TRANSFORMS nativi di ACTD.
 
-    Restituisce quanti edit_bones sono stati effettivamente rimossi.
+    Senza questa pulizia il depsgraph resta con constraint rotti verso bone
+    inesistenti dopo ctrl_def.remove.
+    """
+    for pbone in arm.pose.bones:
+        for con in list(pbone.constraints):
+            nome = getattr(con, "name", "")
+            bersaglio = getattr(con, "subtarget", "")
+            if nome in ("CTRL_DEF_COPY_TRANSFORMS", "CTRL_DEF_IK"):
+                pbone.constraints.remove(con)
+            elif bersaglio and bersaglio in nomi_rimossi:
+                pbone.constraints.remove(con)
+
+
+def _remove_registered_bones(arm, data):
+    """Rimuove in Edit Mode i bone registrati, i target IK e i constraint orfani.
+
+    I target IK_<ctrl> non stanno nel registry (sono derivati, non controller):
+    si eliminano insieme al controller a cui appartengono, prima di ripulire
+    i constraint dei pose bone sopravvissuti. Restituisce quanti edit_bones
+    registrati sono stati effettivamente rimossi.
     """
     removed = 0
     if arm.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.mode_set(mode='EDIT')
     ebones = arm.data.edit_bones
+    nomi_ik = []
+    for name in list(data.keys()):
+        nomi_ik.append("IK_" + name)
+        nomi_ik.append("IK_" + name + "_pole")
     for name in list(data.keys()):
         ebone = ebones.get(name)
         if ebone is not None:
             ebones.remove(ebone)
             removed += 1
         _forget_generated(arm, name)
+    for name in nomi_ik:
+        ebone = ebones.get(name)
+        if ebone is not None:
+            ebones.remove(ebone)
     bpy.ops.object.mode_set(mode='OBJECT')
+    # I nomi restano validi anche se il bone era gia' sparito (cancellazione
+    # manuale in Edit Mode): i constraint che li puntano vanno tolti lo stesso.
+    nomi_rimossi = set(data.keys()) | set(nomi_ik)
+    _remove_ctrl_constraints(arm, nomi_rimossi)
     return removed
 
 
 def _purge_unused_shapes(arm):
     """Elimina le shape della collezione CTRL_Shapes rimaste inutilizzate.
 
-    Vale per le shape condivise CTRL_DEF_SHAPE_* e per le vecchie shape
-    per-controller <nome>_shape: se un pose bone dell'armatura le usa
+    Vale per le shape per-controller CTRL_DEF_SHAPE_* e per le vecchie shape
+    condivise/legacy <nome>_shape: se un pose bone dell'armatura le usa
     ancora (es. controller cancellato a mano in Edit Mode) restano.
     """
     # I pose bone si allineano ai bone solo uscendo da Edit Mode: leggere
@@ -90,9 +127,9 @@ def _purge_unused_shapes(arm):
     for obj in list(bpy.data.objects):
         if obj.type != 'MESH' or obj.name in in_uso:
             continue
-        condivisa = obj.name.startswith("CTRL_DEF_SHAPE_")
+        per_controller = obj.name.startswith("CTRL_DEF_SHAPE_")
         legacy = obj.name.endswith("_shape") and obj.name in nomi_col
-        if condivisa or legacy:
+        if per_controller or legacy:
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
@@ -100,6 +137,10 @@ class CTRLDEF_OT_remove(Operator):
     bl_idname = "ctrl_def.remove"
     bl_label = tr("op.remove")
     bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.remove")
 
     def execute(self, context):
         arm = context.active_object
@@ -147,7 +188,7 @@ def _configure_actd_settings(actd, stg):
     if not stg.prefix_ctrl and hasattr(actd, "use_collection_filter"):
         actd.use_collection_filter = True
         if hasattr(actd, "collection_source"):
-            actd.collection_source = "CTRL"
+            actd.collection_source = "CTRLS"
         if hasattr(actd, "collection_dest"):
             actd.collection_dest = ""
 
@@ -187,6 +228,10 @@ class CTRLDEF_OT_bind_actd(Operator):
     bl_idname = "ctrl_def.bind_actd"
     bl_label = tr("op.bind_actd")
     bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.bind_actd")
 
     def _apply_actd(self, context, stg):
         """Integrazione diretta con ACTD: token sorgente CTRL, destinazione DEF."""
@@ -295,6 +340,10 @@ class CTRLDEF_OT_diagnose(Operator):
     bl_label = tr("op.diagnose")
     bl_options = {'REGISTER'}
 
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.diagnose")
+
     def execute(self, context):
         arm = context.active_object
         if arm is None or arm.type != "ARMATURE":
@@ -343,19 +392,18 @@ def _addon_version():
     return "0.0.0"
 
 
-# Proprieta' di CTRLDEF_PG_settings serializzate nel preset utente
-_SETTINGS_KEYS = ("prefix_def", "prefix_ctrl", "shape", "scale", "shape_rot",
-                  "color", "parent", "mirror")
+# Proprieta' di CTRLDEF_PG_settings serializzate nel preset utente.
+# La vecchia chiave "shape_rot" dei preset salvati con versioni precedenti non
+# e' piu' letta: viene ignorata come qualsiasi chiave sconosciuta (fallback legacy).
+_SETTINGS_KEYS = ("prefix_def", "prefix_ctrl", "widget_name", "scale",
+                  "parent", "mirror")
 
 
 def _settings_values(stg):
     """Dizionario dei valori correnti delle impostazioni (JSON-serializzabile)."""
     valori = {}
     for chiave in _SETTINGS_KEYS:
-        valore = getattr(stg, chiave)
-        if chiave == "shape_rot":
-            valore = list(valore)
-        valori[chiave] = valore
+        valori[chiave] = getattr(stg, chiave)
     return valori
 
 
@@ -364,22 +412,22 @@ def _apply_settings_values(stg, valori):
     for chiave in _SETTINGS_KEYS:
         if chiave not in valori:
             continue
-        valore = valori[chiave]
-        if chiave == "shape_rot":
-            valore = tuple(valore)
-        setattr(stg, chiave, valore)
+        setattr(stg, chiave, valori[chiave])
     return stg
 
 
 def _prepare_export(op, context):
     """Controlli comuni: armatura attiva e registro non vuoto.
 
+    Il registry viene potato prima della lettura: un controller cancellato a
+    mano in Edit Mode non deve finire nel JSON/CSV esportato.
     Restituisce (arm, data) oppure (None, None) dopo aver riportato l'errore.
     """
     arm = context.active_object
     if arm is None or arm.type != "ARMATURE":
         op.report({'ERROR'}, tr("msg.no_armature"))
         return None, None
+    _prune_registry(arm)
     data = _read_registry(arm)
     if not data:
         op.report({'WARNING'}, tr("msg.no_registered"))
@@ -391,6 +439,10 @@ class CTRLDEF_OT_export_json(Operator, ExportHelper):
     bl_idname = "ctrl_def.export_json"
     bl_label = tr("op.export_json")
     bl_options = {'REGISTER'}
+
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.export_json")
 
     filename_ext = ".json"
     filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
@@ -421,6 +473,10 @@ class CTRLDEF_OT_export_csv(Operator, ExportHelper):
     bl_label = tr("op.export_csv")
     bl_options = {'REGISTER'}
 
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.export_csv")
+
     filename_ext = ".csv"
     filter_glob: StringProperty(default="*.csv", options={'HIDDEN'})
 
@@ -450,6 +506,10 @@ class CTRLDEF_OT_save_preset(Operator, ExportHelper):
     bl_label = tr("op.save_preset")
     bl_options = {'REGISTER'}
 
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.save_preset")
+
     filename_ext = ".json"
     filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
 
@@ -458,9 +518,8 @@ class CTRLDEF_OT_save_preset(Operator, ExportHelper):
         return super().invoke(context, event)
 
     def execute(self, context):
-        arm, _data = _prepare_export(self, context)
-        if arm is None:
-            return {'CANCELLED'}
+        # Il preset riguarda solo le impostazioni della scena: non serve
+        # un'armatura e si puo' salvare prima di generare i controller.
         stg = context.scene.ctrl_def_settings
         try:
             with open(self.filepath, "w", encoding="utf-8") as file_out:
@@ -478,6 +537,10 @@ class CTRLDEF_OT_load_preset(Operator, ImportHelper):
     bl_label = tr("op.load_preset")
     bl_options = {'REGISTER', 'UNDO'}
 
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.load_preset")
+
     filename_ext = ".json"
     filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
 
@@ -486,16 +549,18 @@ class CTRLDEF_OT_load_preset(Operator, ImportHelper):
         return super().invoke(context, event)
 
     def execute(self, context):
-        arm, _data = _prepare_export(self, context)
-        if arm is None:
-            return {'CANCELLED'}
+        # Il preset riguarda solo le impostazioni della scena: si carica anche
+        # senza armatura e senza che sia stato generato alcun controller.
         try:
             with open(self.filepath, "r", encoding="utf-8") as file_in:
                 valori = json.load(file_in)
         except (OSError, ValueError) as exc:
             self.report({'ERROR'}, tr("msg.export_failed") + ": " + str(exc))
             return {'CANCELLED'}
-        if not isinstance(valori, dict):
+        # Un file che non e' un preset (es. ctrl_def_mapping.json) non deve
+        # passare come caricamento riuscito: serve almeno una chiave nota.
+        if not isinstance(valori, dict) or not any(k in valori
+                                                   for k in _SETTINGS_KEYS):
             self.report({'ERROR'}, tr("msg.export_failed") + ": " + self.filepath)
             return {'CANCELLED'}
         _apply_settings_values(context.scene.ctrl_def_settings, valori)
@@ -516,7 +581,9 @@ def _pose_bone_selected(pbone):
     """
     if hasattr(pbone, "select") and pbone.select:
         return True
-    return pbone.bone.select
+    # Da Blender 5.0 il Bone non espone piu' "select": il fallback vale
+    # solo sulle versioni in cui la proprieta' esiste ancora.
+    return bool(getattr(pbone.bone, "select", False))
 
 
 def _selected_ctrl_chains(arm):
@@ -537,7 +604,8 @@ def _selected_ctrl_chains(arm):
         return pb is not None and _pose_bone_selected(pb)
 
     selezione = [pb for pb in arm.pose.bones
-                 if pb.name in registro and _pose_bone_selected(pb)]
+                 if pb.name in registro and not pb.name.startswith("IK_")
+                 and _pose_bone_selected(pb)]
     catene = []
     for pb in selezione:
         catena = [pb.name]
@@ -620,6 +688,10 @@ class CTRLDEF_OT_add_ik(Operator):
     bl_label = tr("op.add_ik")
     bl_options = {'REGISTER', 'UNDO'}
 
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.add_ik")
+
     def execute(self, context):
         arm = context.active_object
         if arm is None or arm.type != "ARMATURE":
@@ -636,9 +708,51 @@ class CTRLDEF_OT_add_ik(Operator):
             return {'CANCELLED'}
         creati = 0
         for catena in catene:
-            creati += _add_ik_target_chain(arm, "CTRL", catena)
+            creati += _add_ik_target_chain(arm, "CTRLS", catena)
         _ensure_armature_mode(context, arm, 'OBJECT')
         self.report({'INFO'}, tr("msg.ik_created") + ": " + str(creati))
+        return {'FINISHED'}
+
+
+class CTRLDEF_OT_create_widget(Operator):
+    bl_idname = "ctrl_def.create_widget"
+    bl_label = tr("op.bw_create")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def description(cls, context, properties):
+        return tr("tip.op.create_widget")
+
+    def execute(self, context):
+        # I widget sono delegati a Bone Widget: senza l'estensione non si
+        # crea nulla e non si sollevano eccezioni.
+        if not _bonewidget_available():
+            self.report({'WARNING'}, tr("msg.bw_missing"))
+            return {'CANCELLED'}
+        arm = context.active_object
+        if arm is None or arm.type != "ARMATURE":
+            self.report({'ERROR'}, tr("msg.no_armature"))
+            return {'CANCELLED'}
+        # La selezione dei bone si legge solo in Pose Mode
+        _ensure_armature_mode(context, arm, 'POSE')
+        # La selezione scritta dai test/pannelli va consolidata prima della lettura
+        context.view_layer.update()
+        registro = _read_registry(arm)
+        scelti = [pb.name for pb in arm.pose.bones
+                  if pb.name in registro and _pose_bone_selected(pb)]
+        if not scelti:
+            # Nessun controller selezionato: il widget va a tutti i registrati
+            scelti = list(registro.keys())
+        if not scelti:
+            _ensure_armature_mode(context, arm, 'OBJECT')
+            self.report({'ERROR'}, tr("msg.no_registered"))
+            return {'CANCELLED'}
+        stg = context.scene.ctrl_def_settings
+        if not _bonewidget_create(arm, scelti, stg.widget_name, stg.scale):
+            _ensure_armature_mode(context, arm, 'OBJECT')
+            self.report({'WARNING'}, tr("msg.bw_missing"))
+            return {'CANCELLED'}
+        self.report({'INFO'}, tr("op.bw_create") + ": " + str(len(scelti)))
         return {'FINISHED'}
 
 

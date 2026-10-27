@@ -11,22 +11,31 @@ import tempfile
 from mathutils import Vector
 
 # Percorso dell'addon (entry point del package) per il caricamento diretto
-_PATH_ADDON = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "__init__.py"))
+_REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+_PATH_ADDON = os.path.join(_REPO_ROOT, "__init__.py")
+
+# La radice del repo sta su sys.path: l'addon non tocca piu' sys.path (la
+# policy delle Blender Extensions lo vieta), quindi la preparazione del
+# percorso e' compito della suite.
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 
 def _addon_module():
     """Modulo dell'addon: quello del runner se presente, altrimenti dal file.
 
-    Il caricamento da file avviene senza register(): serve solo per leggere
+    Il caricamento da file avviene come package reale (submodule_search_locations
+    e registrazione in sys.modules) e senza register(): serve solo per leggere
     bl_info e le funzioni pure (_read_registry, _mirror_name, ...).
     """
-    mod = sys.modules.get("ctrl_def_addon") or sys.modules.get("ctrl_def_src")
+    mod = sys.modules.get("ctrl_def_addon")
     if mod is not None and isinstance(getattr(mod, "bl_info", None), dict):
         return mod
-    spec = importlib.util.spec_from_file_location("ctrl_def_src", _PATH_ADDON)
+    spec = importlib.util.spec_from_file_location(
+        "ctrl_def_addon", _PATH_ADDON, submodule_search_locations=[_REPO_ROOT])
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["ctrl_def_src"] = mod
+    sys.modules["ctrl_def_addon"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -77,8 +86,29 @@ def _seleziona_posa(arm_obj, nomi=None, stato=True):
     for pbone in bersagli:
         if hasattr(pbone, "select"):
             pbone.select = stato
-        pbone.bone.select = stato
+        # Da Blender 5.0 il Bone dell'armatura non espone piu' "select":
+        # lo stato si copia solo se la proprieta' esiste ancora.
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = stato
     bpy.context.view_layer.update()
+
+
+def _seleziona_def(arm_obj, nomi):
+    """Allinea la selezione dei DEF su pose bone ed edit bone.
+
+    Blender 5.x riallinea la selezione degli edit bone a quella dei pose bone
+    quando si entra in Edit Mode: senza questo passaggio generate legge uno
+    stato vecchio e rifiuta con "No DEF bones selected". Stessa sorgente del
+    blocco IK, che seleziona i controller in Pose Mode.
+    """
+    bpy.ops.object.mode_set(mode='POSE')
+    _seleziona_posa(arm_obj, None, False)
+    _seleziona_posa(arm_obj, nomi, True)
+    # Passaggio da Edit Mode: la selezione arriva anche sugli edit bone
+    bpy.ops.object.mode_set(mode='EDIT')
+    for ebone in arm_obj.data.edit_bones:
+        ebone.select = ebone.name in nomi
+    bpy.ops.object.mode_set(mode='OBJECT')
 
 
 def _walk_up(bone):
@@ -100,18 +130,20 @@ def test_registration_elements():
     assert hasattr(bpy.ops.ctrl_def, "remove"), "Operatore ctrl_def.remove mancante"
     assert hasattr(bpy.ops.ctrl_def, "bind_actd"), "Operatore ctrl_def.bind_actd mancante"
     assert hasattr(bpy.ops.ctrl_def, "diagnose"), "Operatore ctrl_def.diagnose mancante"
+    assert hasattr(bpy.ops.ctrl_def, "create_widget"), \
+        "Operatore ctrl_def.create_widget mancante"
     assert hasattr(bpy.types.Scene, "ctrl_def_settings"), "Scene.ctrl_def_settings mancante"
     stg = bpy.context.scene.ctrl_def_settings
     assert stg.prefix_ctrl == "", f"prefix_ctrl deve essere vuoto di default, trovato {stg.prefix_ctrl!r}"
     assert stg.parent == "CHAIN", f"parent di default deve essere CHAIN, trovato {stg.parent!r}"
     assert stg.prefix_def == "DEF_", f"prefix_def di default inatteso: {stg.prefix_def!r}"
-    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.1.2
+    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.2.0
     mod = _addon_module()
     assert mod is not None, "Modulo dell'addon non trovato: impossibile leggere bl_info"
     bl_info = mod.bl_info
     assert bl_info["author"] == "Pierfrancesco Diodato", \
         f"bl_info['author'] inatteso: {bl_info['author']!r}"
-    assert tuple(bl_info["version"]) == (0, 1, 2), \
+    assert tuple(bl_info["version"]) == (0, 2, 0), \
         f"bl_info['version'] inattesa: {bl_info['version']!r}"
     # Nome, categoria e bl_idname non devono cambiare
     assert bl_info["name"] == "DEF Controller Auto", f"bl_info['name'] cambiato: {bl_info['name']!r}"
@@ -128,14 +160,16 @@ def test_registration_elements():
     assert mod.tr("op.generate", "en") == "Generate Controllers", \
         f"tr('op.generate', 'en') inatteso: {mod.tr('op.generate', 'en')!r}"
     # Chiavi aggiunte per le EnumProperty e i messaggi dell'operatore di bind
-    for chiave in ("msg.no_registered", "msg.bound", "shape.circle", "shape.cube",
-                   "shape.sphere", "shape.arrow", "shape.cross", "color.none",
-                   "color.red", "color.green", "color.blue", "parent.chain",
+    for chiave in ("msg.no_registered", "msg.bound", "msg.bw_missing",
+                   "op.bw_create", "op.bw_install",
+                   "parent.chain",
                    "parent.chain_tip", "parent.bone", "parent.bone_tip",
                    "parent.root", "parent.root_tip", "parent.none",
                    "parent.none_tip", "parent.def", "parent.def_tip",
                    "preset.default", "preset.biped", "preset.root", "preset.face",
-                   "op.diagnose", "msg.diag_ok", "msg.diag_issues"):
+                   "op.diagnose", "msg.diag_ok", "msg.diag_issues",
+                   "sec.setup", "sec.controller", "sec.advanced", "sec.guide",
+                   "guide.1", "guide.2", "guide.3", "guide.4", "guide.5"):
         for lingua in ("it", "en"):
             assert chiave in mod._I18N[lingua], f"Chiave {chiave!r} assente in _I18N[{lingua!r}]"
     assert mod.tr("msg.no_registered", "it") == "Nessun controller registrato", \
@@ -150,19 +184,82 @@ def test_registration_elements():
         f"msg.diag_ok IT inatteso: {mod.tr('msg.diag_ok', 'it')!r}"
     assert mod.tr("msg.diag_issues", "en") == "Issues found", \
         f"msg.diag_issues EN inatteso: {mod.tr('msg.diag_issues', 'en')!r}"
+    # Titoli di sezione e guida rapida: presenti in IT/EN, corti per la sidebar
+    assert mod.tr("sec.setup", "it") == "1 · Setup", \
+        f"sec.setup IT inatteso: {mod.tr('sec.setup', 'it')!r}"
+    assert mod.tr("sec.guide", "en") == "Guide", \
+        f"sec.guide EN inatteso: {mod.tr('sec.guide', 'en')!r}"
+    for passo in ("guide.1", "guide.2", "guide.3", "guide.4", "guide.5"):
+        for lingua in ("it", "en"):
+            testo = mod.tr(passo, lingua)
+            assert testo and testo != passo, \
+                f"Chiave {passo!r} senza traduzione in {lingua!r}: {testo!r}"
+            assert len(testo) <= 28, \
+                f"Testo di {passo!r} in {lingua!r} troppo lungo ({len(testo)}): {testo!r}"
+    assert mod.tr("guide.1", "it") == "1 Armatura con bone DEF_", \
+        f"guide.1 IT inatteso: {mod.tr('guide.1', 'it')!r}"
+    assert mod.tr("guide.4", "en") == "4 Bind DEF to CTRL", \
+        f"guide.4 EN inatteso: {mod.tr('guide.4', 'en')!r}"
     # Callback delle EnumProperty: con items dinamici il default e' l'indice 0,
     # quindi la prima voce deve restare quella storica di default.
-    assert mod._items_shape(None, None)[0][0] == "CIRCLE", \
-        f"Prima voce di _items_shape: {mod._items_shape(None, None)[0][0]!r} invece di 'CIRCLE'"
-    assert mod._items_color(None, None)[0][0] == "NONE", \
-        f"Prima voce di _items_color: {mod._items_color(None, None)[0][0]!r} invece di 'NONE'"
     assert mod._items_parent(None, None)[0][0] == "CHAIN", \
         f"Prima voce di _items_parent: {mod._items_parent(None, None)[0][0]!r} invece di 'CHAIN'"
     assert mod._items_preset(None, None)[0][0] == "DEFAULT", \
         f"Prima voce di _items_preset: {mod._items_preset(None, None)[0][0]!r} invece di 'DEFAULT'"
+    # Tooltip dinamici: IT ed EN devono avere esattamente le stesse chiavi,
+    # altrimenti una delle due lingue mostra la chiave grezza nel mouseover.
+    assert set(mod._I18N["it"].keys()) == set(mod._I18N["en"].keys()), \
+        ("Chiavi IT/EN non simmetriche: solo IT=%r solo EN=%r" % (
+            sorted(set(mod._I18N["it"]) - set(mod._I18N["en"])),
+            sorted(set(mod._I18N["en"]) - set(mod._I18N["it"]))))
+    assert mod.tr("op.create", "en") == "Create Controllers", \
+        f"op.create EN inatteso: {mod.tr('op.create', 'en')!r}"
+    # Ogni proprieta' del pannello ha il proprio tooltip in entrambe le lingue
+    for _chiave_prop in ("tip.prop.prefix_def", "tip.prop.prefix_ctrl",
+                         "tip.prop.scale", "tip.prop.parent",
+                         "tip.prop.mirror", "tip.prop.preset"):
+        for _lingua in ("it", "en"):
+            _testo_prop = mod.tr(_chiave_prop, _lingua)
+            assert _testo_prop and _testo_prop != _chiave_prop, \
+                f"Tooltip {_chiave_prop!r} assente in {_lingua!r}: {_testo_prop!r}"
+    # Gli 11 operatori devono esporre description() bilingue: si forza la lingua
+    # sostituendo tr() nello spazio dei nomi del modulo che definisce la classe.
+    _nomi_op = ("generate", "apply_preset", "remove", "bind_actd", "diagnose",
+                "export_json", "export_csv", "save_preset", "load_preset",
+                "add_ik", "create_widget")
+    for _nome_op in _nomi_op:
+        _cls_op = getattr(mod, "CTRLDEF_OT_" + _nome_op, None)
+        assert _cls_op is not None, f"Classe CTRLDEF_OT_{_nome_op} mancante"
+        _chiave_tip = "tip.op." + _nome_op
+        _globs_op = _cls_op.description.__func__.__globals__
+        _tr_op_reale = _globs_op["tr"]
+        _testi = {}
+        try:
+            for _lingua in ("it", "en"):
+                _globs_op["tr"] = lambda k, _l=_lingua: mod.tr(k, _l)
+                _testi[_lingua] = _cls_op.description(bpy.context, None)
+        finally:
+            _globs_op["tr"] = _tr_op_reale
+        for _lingua in ("it", "en"):
+            assert _testi[_lingua] and _testi[_lingua] != _chiave_tip, \
+                f"description() di CTRLDEF_OT_{_nome_op} vuota in {_lingua!r}: {_testi[_lingua]!r}"
+            assert _testi[_lingua] == mod.tr(_chiave_tip, _lingua), \
+                (f"description() di CTRLDEF_OT_{_nome_op} in {_lingua!r}: "
+                 f"{_testi[_lingua]!r} invece di {mod.tr(_chiave_tip, _lingua)!r}")
+        assert _testi["it"] != _testi["en"], \
+            f"Tooltip di CTRLDEF_OT_{_nome_op} identico in IT ed EN: {_testi['it']!r}"
+    # Il colore non e' piu' una proprieta' di CTRL_DEF: lo gestisce Bone Widget.
+    # Come per 'shape', la rimozione va verificata (nessun controllo morto).
+    assert not hasattr(mod, "_items_color"), \
+        "La callback _items_color non deve piu' esistere (colore delegato a Bone Widget)"
+    for chiave_morta in ("color.none", "color.red", "color.green", "color.blue",
+                         "panel.color"):
+        for lingua in ("it", "en"):
+            assert chiave_morta not in mod._I18N[lingua], \
+                f"Chiave morta {chiave_morta!r} ancora presente in _I18N[{lingua!r}]"
     # Etichette delle callback in IT ed EN: si forza la lingua sostituendo tr()
-    # nello spazio dei nomi del modulo che definisce _items_shape (package).
-    _globs_props = mod._items_shape.__globals__
+    # nello spazio dei nomi del modulo che definisce _items_parent (package).
+    _globs_props = mod._items_parent.__globals__
     _tr_reale = _globs_props["tr"]
 
     def _tr_forzato(lingua):
@@ -170,24 +267,30 @@ def test_registration_elements():
 
     try:
         _globs_props["tr"] = _tr_forzato("it")
-        voci_it = {voce[0]: voce[1] for voce in mod._items_shape(None, None)}
+        voci_it = {voce[0]: voce[1] for voce in mod._items_parent(None, None)}
         _globs_props["tr"] = _tr_forzato("en")
-        voci_en = {voce[0]: voce[1] for voce in mod._items_shape(None, None)}
+        voci_en = {voce[0]: voce[1] for voce in mod._items_parent(None, None)}
     finally:
         _globs_props["tr"] = _tr_reale
-    assert voci_it.get("CIRCLE") == "Cerchio", f"_items_shape IT: {voci_it}"
-    assert voci_it.get("CUBE") == "Cubo", f"_items_shape IT (CUBE): {voci_it}"
-    assert voci_it.get("SPHERE") == "Sfera", f"_items_shape IT (SPHERE): {voci_it}"
-    assert voci_it.get("ARROW") == "Freccia", f"_items_shape IT (ARROW): {voci_it}"
-    assert voci_it.get("CROSS") == "Croce", f"_items_shape IT (CROSS): {voci_it}"
-    assert voci_en.get("CIRCLE") == "Circle", f"_items_shape EN: {voci_en}"
-    assert voci_en.get("CUBE") == "Cube", f"_items_shape EN (CUBE): {voci_en}"
-    assert voci_en.get("SPHERE") == "Sphere", f"_items_shape EN (SPHERE): {voci_en}"
-    assert voci_en.get("ARROW") == "Arrow", f"_items_shape EN (ARROW): {voci_en}"
-    assert voci_en.get("CROSS") == "Cross", f"_items_shape EN (CROSS): {voci_en}"
+    assert voci_it.get("CHAIN") == "Catena CTRL (FK)", f"_items_parent IT: {voci_it}"
+    assert voci_it.get("ROOT") == "Root", f"_items_parent IT (ROOT): {voci_it}"
+    assert voci_en.get("CHAIN") == "CTRL Chain (FK)", f"_items_parent EN: {voci_en}"
+    assert voci_en.get("ROOT") == "Root", f"_items_parent EN (ROOT): {voci_en}"
+    # I widget sono delegati a Bone Widget: l'etichetta del campo lo dichiara
+    assert mod.tr("panel.shape", "it") == "Widget (Bone Widget)", \
+        f"panel.shape IT inatteso: {mod.tr('panel.shape', 'it')!r}"
+    assert mod.tr("panel.shape", "en") == "Widget (Bone Widget)", \
+        f"panel.shape EN inatteso: {mod.tr('panel.shape', 'en')!r}"
+    assert mod.tr("msg.bw_missing", "it") == "Installa Bone Widget per i widget", \
+        f"msg.bw_missing IT inatteso: {mod.tr('msg.bw_missing', 'it')!r}"
+    assert mod.tr("msg.bw_missing", "en") == "Install Bone Widget for the widgets", \
+        f"msg.bw_missing EN inatteso: {mod.tr('msg.bw_missing', 'en')!r}"
+    # Titolo del riquadro Bone Widget nella sezione 2 · Controller
+    assert mod.tr("panel.widget", "it") == "Widget", \
+        f"panel.widget IT inatteso: {mod.tr('panel.widget', 'it')!r}"
+    assert mod.tr("panel.widget", "en") == "Widget", \
+        f"panel.widget EN inatteso: {mod.tr('panel.widget', 'en')!r}"
     # Le altre callback espongono le stesse 5/4 voci attese
-    assert [v[0] for v in mod._items_color(None, None)] == ["NONE", "RED", "GREEN", "BLUE"], \
-        f"Voci di _items_color inattese: {[v[0] for v in mod._items_color(None, None)]}"
     assert [v[0] for v in mod._items_parent(None, None)] == ["CHAIN", "BONE", "ROOT", "NONE", "DEF"], \
         f"Voci di _items_parent inattese: {[v[0] for v in mod._items_parent(None, None)]}"
     assert [v[0] for v in mod._items_preset(None, None)] == ["DEFAULT", "BIPED_LIMB", "ROOT_CTRL", "FACE"], \
@@ -197,11 +300,14 @@ def test_registration_elements():
                         "_assign_ctrl_parents", "_configure_ctrl_pose_bones"):
         assert callable(getattr(mod, nome_helper, None)), \
             f"Helper di generazione {nome_helper} mancante o non chiamabile nel modulo"
-    # Builder geometrici puri, dispatcher, preset, remove e draw helpers
-    for nome_helper in ("_make_cube", "_make_sphere", "_make_arrow", "_make_cross",
-                        "_shape_geometry", "_apply_preset_values",
+    # Delegati a Bone Widget, dispatcher rimosso: i widget esterni non hanno
+    # geometria interna da costruire, serve solo il ponte verso l'estensione
+    for nome_helper in ("_bonewidget_available", "_bonewidget_create",
+                        "_apply_preset_values",
                         "_remove_registered_bones", "_draw_stats_box",
                         "_draw_preset_box", "_draw_settings", "_draw_actions",
+                        "_draw_controller_settings", "_draw_advanced_actions",
+                        "_draw_guide", "_section", "_draw_widget_box",
                         "_purge_unused_shapes", "_ensure_armature_mode",
                         "_configure_actd_settings", "_count_actd_bindings_for_arm",
                         "_apply_native_bindings", "_register_class_safe",
@@ -217,13 +323,39 @@ def test_registration_elements():
     assert stg_dopo is not None, "Scene.ctrl_def_settings non accessibile dopo register() ripetuto"
     assert stg_dopo.prefix_def == "DEF_", \
         f"prefix_def alterato da register() ripetuto: {stg_dopo.prefix_def!r}"
-    for forma in ("CIRCLE", "CUBE", "SPHERE", "ARROW", "CROSS"):
-        geometria = mod._shape_geometry(forma, 1.0)
-        assert isinstance(geometria, tuple) and len(geometria) == 2, \
-            f"_shape_geometry('{forma}') non restituisce la coppia (verts, edges): {geometria!r}"
-        verts, edges = geometria
-        assert len(verts) > 0, f"_shape_geometry('{forma}') senza vertici"
-        assert len(edges) > 0, f"_shape_geometry('{forma}') senza spigoli"
+    # Il campo del widget e' una stringa con default "Circle" (nome del widget
+    # fornito da Bone Widget): la vecchia enum interna non deve piu' esistere.
+    assert stg_dopo.widget_name == "Circle", \
+        f"widget_name di default inatteso: {stg_dopo.widget_name!r}"
+    assert not hasattr(stg_dopo, "shape"), \
+        "La vecchia proprieta' enum 'shape' non deve piu' esistere (widget delegati)"
+    assert not hasattr(stg_dopo, "color"), \
+        "La vecchia proprieta' enum 'color' non deve piu' esistere (colore delegato a Bone Widget)"
+    # La rotazione del widget la gestisce Bone Widget: nessun controllo morto
+    assert not hasattr(stg_dopo, "shape_rot"), \
+        "shape_rot non deve piu' esistere: la rotazione e' delegata a Bone Widget"
+    # Senza Bone Widget il ponte ritorna False, senza sollevare eccezioni
+    if not mod._bonewidget_available():
+        assert mod._bonewidget_create(None, [], "Circle", 1.0) is False, \
+            "Senza Bone Widget _bonewidget_create deve restituire False"
+    # Il sotto-modulo bpy.ops.bonewidget e' pigro: hasattr(...) risponde sempre
+    # True. La disponibilita' deve dipendere dalla classe registrata.
+    chiavi_addon = tuple(bpy.context.preferences.addons.keys())
+    if not hasattr(bpy.types, "BONEWIDGET_OT_create_widget") and \
+            not any(k == "bone_widget" or k.endswith(".bone_widget")
+                    or k == "bonewidget" or k.endswith(".bonewidget")
+                    for k in chiavi_addon):
+        assert mod._bonewidget_available() is False, \
+            "Bone Widget assente ma _bonewidget_available() dice True " \
+            "(falso positivo di bpy.ops.bonewidget pigro)"
+    assert isinstance(getattr(mod, "_ITEMS_CACHE", None), list), \
+        "_ITEMS_CACHE deve esistere ed essere una lista (anti garbage-collection)"
+    voci_cache = mod._items_parent(None, None)
+    assert voci_cache in mod._ITEMS_CACHE, \
+        "L'elenco restituito da _items_parent non e' trattenuto in _ITEMS_CACHE"
+    voci_preset_cache = mod._items_preset(None, None)
+    assert voci_preset_cache in mod._ITEMS_CACHE, \
+        "L'elenco restituito da _items_preset non e' trattenuto in _ITEMS_CACHE"
     # Architettura Moduli + Package: lo script di build e gli 8 moduli
     # funzionali devono esistere su disco accanto all'entry point __init__.py
     radice_addon = os.path.abspath(
@@ -264,7 +396,11 @@ def test_naming_pulito_e_prefisso():
     ctrl_bone = arm_data.bones["hand.L"]
     assert ctrl_bone.use_deform is False, "Il controller deve avere use_deform == False"
     assert ctrl_bone.parent is None, "Senza DEF genitore il controller non deve avere parent"
-    assert arm_obj.pose.bones["hand.L"].custom_shape is not None, "custom_shape mancante su hand.L"
+    # I controller non hanno piu' shape interne: i widget li crea Bone Widget
+    assert not any(o.name.startswith("CTRL_DEF_SHAPE_") for o in bpy.data.objects), \
+        f"CTRL_DEF non deve creare oggetti CTRL_DEF_SHAPE_*: {[o.name for o in bpy.data.objects]}"
+    assert bpy.data.collections.get("CTRL_Shapes") is None, \
+        "La collezione interna CTRL_Shapes non deve piu' essere creata"
     reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
     assert reg.get("hand.L", {}).get("def") == "DEF_hand.L", f"Registry errato: {reg}"
 
@@ -315,21 +451,76 @@ def test_naming_pulito_e_prefisso():
     assert reg.get("arm_L", {}).get("def") == "DEF_arm_L", f"Registry errato per arm_L: {reg}"
     assert reg.get("arm_R", {}).get("def") == "DEF_arm_R", f"Registry errato per arm_R: {reg}"
 
-    # 5. Orientamento della custom shape: gradi nella UI, radianti nel pose bone
+    # 5. Widget separati dai controller: ctrl_def.generate NON crea widget,
+    # solo ctrl_def.create_widget delega a Bone Widget (quando disponibile).
+    # Il pose bone deve restare senza shape creata da CTRL_DEF: la shape la
+    # mette Bone Widget, altrimenti resta vuota senza errori bloccanti.
     _reset()
-    stg = bpy.context.scene.ctrl_def_settings
-    stg.shape_rot = (90.0, 0.0, 0.0)
-    arm_obj, arm_data = _new_armature("RigShapeRot")
-    bpy.ops.object.mode_set(mode='EDIT')
-    _add_bone(arm_data, "DEF_hand.L", (0.0, 0.0, 1.0), (0.0, 0.5, 1.0))
-    bpy.ops.object.mode_set(mode='OBJECT')
-    res = bpy.ops.ctrl_def.generate()
-    assert res == {'FINISHED'}, f"Generazione con shape_rot fallita: {res}"
-    eul = arm_obj.pose.bones["hand.L"].custom_shape_rotation_euler
-    atteso = (math.radians(90.0), 0.0, 0.0)
-    for i, (got, exp) in enumerate(zip(eul, atteso)):
-        assert abs(got - exp) < 1e-5, \
-            f"custom_shape_rotation_euler[{i}] = {got} invece di {exp} (rotazione in radianti attesa)"
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il test dei widget"
+    gen_mod = sys.modules.get(mod.CTRLDEF_OT_generate.__module__)
+    assert gen_mod is not None, "Modulo di generazione non trovato in sys.modules"
+    assert not hasattr(gen_mod, "_bonewidget_create"), \
+        "La generazione non deve piu' delegare i widget a Bone Widget"
+    ops_mod = sys.modules.get(mod.CTRLDEF_OT_create_widget.__module__)
+    assert ops_mod is not None, "Modulo operatori non trovato in sys.modules"
+    assert callable(getattr(ops_mod, "_bonewidget_create", None)), \
+        "Helper _bonewidget_create mancante nel modulo operatori"
+    chiamate = []
+
+    def _spia_bonewidget(arm, nomi, widget, scala):
+        """Registra la delega e non assegna shape: non spetta ai test."""
+        chiamate.append((arm.name, list(nomi), widget, scala))
+        return True
+
+    originale_bw = ops_mod._bonewidget_create
+    originale_avail = ops_mod._bonewidget_available
+    ops_mod._bonewidget_create = _spia_bonewidget
+    try:
+        stg = bpy.context.scene.ctrl_def_settings
+        stg.widget_name = "Cube"
+        stg.scale = 1.0
+        arm_obj, arm_data = _new_armature("RigWidget")
+        bpy.ops.object.mode_set(mode='EDIT')
+        _add_bone(arm_data, "DEF_hand.L", (0.0, 0.0, 1.0), (0.0, 0.5, 1.0))
+        bpy.ops.object.mode_set(mode='OBJECT')
+        res = bpy.ops.ctrl_def.generate()
+        assert res == {'FINISHED'}, f"Generazione con widget_name fallita: {res}"
+        assert chiamate == [], \
+            f"ctrl_def.generate non deve creare widget, chiamate: {chiamate}"
+        # Bone Widget assente: il wrapper rifiuta senza toccare nulla
+        ops_mod._bonewidget_available = lambda: False
+        res_no_bw = bpy.ops.ctrl_def.create_widget()
+        assert res_no_bw == {'CANCELLED'}, \
+            f"create_widget senza Bone Widget deve annullarsi: {res_no_bw}"
+        assert chiamate == [], \
+            f"create_widget senza Bone Widget ha delegato comunque: {chiamate}"
+        # Bone Widget presente: il wrapper crea il widget sui controller
+        ops_mod._bonewidget_available = lambda: True
+        res_widget = bpy.ops.ctrl_def.create_widget()
+    finally:
+        ops_mod._bonewidget_create = originale_bw
+        ops_mod._bonewidget_available = originale_avail
+    assert res_widget == {'FINISHED'}, \
+        f"create_widget con Bone Widget attivo fallito: {res_widget}"
+    assert len(chiamate) == 1, \
+        f"_bonewidget_create chiamato {len(chiamate)} volte invece di 1"
+    arm_chiamata, nomi_chiamati, widget_chiamato, scala_chiamata = chiamate[0]
+    assert arm_chiamata == arm_obj.name, \
+        f"La delega del widget non punta all'armatura generata: {arm_chiamata!r}"
+    assert nomi_chiamati == ["hand.L"], \
+        f"Nomi passati a _bonewidget_create: {nomi_chiamati}"
+    assert widget_chiamato == "Cube", \
+        f"Widget passato a _bonewidget_create: {widget_chiamato!r}"
+    assert abs(scala_chiamata - 1.0) < 1e-6, \
+        f"Scala passata a _bonewidget_create: {scala_chiamata}"
+    pbone_hand = arm_obj.pose.bones.get("hand.L")
+    assert pbone_hand is not None, "Controller hand.L non creato con widget_name impostato"
+    assert pbone_hand.custom_shape is None, \
+        ("CTRL_DEF non deve assegnare custom_shape: il widget e' delegato a "
+         f"Bone Widget, trovato {pbone_hand.custom_shape!r}")
+    assert not any(o.name.startswith("CTRL_DEF_SHAPE_") for o in bpy.data.objects), \
+        f"CTRL_DEF ha creato oggetti shape interni: {[o.name for o in bpy.data.objects]}"
 
 
 def test_parent_chain_fk():
@@ -340,6 +531,7 @@ def test_parent_chain_fk():
     bpy.ops.object.mode_set(mode='EDIT')
     _build_chain(arm_data)
     bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
     res = bpy.ops.ctrl_def.generate()
     assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
     for nm in ("arm.L", "forearm.L", "hand.L"):
@@ -356,35 +548,37 @@ def test_parent_chain_fk():
         assert len(path) == len(set(path)), f"Anello di gerarchia rilevato per {nm}: {path}"
         assert all(not p.startswith("DEF_") for p in path), f"{nm} dipende da un bone DEF: {path}"
 
-    # Shape condivisa: 3 controller con CUBE puntano allo stesso oggetto
-    stg.shape = "CUBE"
+    # Rigenerazione con un altro widget: i controller restano validi e nessuna
+    # mesh di shape viene creata da CTRL_DEF (i widget sono di Bone Widget)
+    stg.widget_name = "Cube"
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
     res = bpy.ops.ctrl_def.generate()
-    assert res == {'FINISHED'}, f"Rigenerazione con shape CUBE fallita: {res}"
-    shape_cube = bpy.data.objects.get("CTRL_DEF_SHAPE_CUBE")
-    assert shape_cube is not None, "Oggetto condiviso CTRL_DEF_SHAPE_CUBE non creato"
-    assert shape_cube.data.name == "CTRL_DEF_SHAPE_CUBE", \
-        f"Nome mesh della shape non canonico: {shape_cube.data.name!r}"
-    for nm in ("arm.L", "forearm.L", "hand.L"):
-        cs = arm_obj.pose.bones[nm].custom_shape
-        assert cs is not None, f"custom_shape mancante su {nm}"
-        assert cs.name == "CTRL_DEF_SHAPE_CUBE", \
-            f"{nm} usa {cs.name!r} invece della shape condivisa CTRL_DEF_SHAPE_CUBE"
-        assert cs.name == shape_cube.name, f"{nm} non punta allo stesso oggetto degli altri controller"
-    # Tutte le shape condivise finiscono nella collezione CTRL_Shapes
-    col_shapes = bpy.data.collections.get("CTRL_Shapes")
-    assert col_shapes is not None, "Collezione CTRL_Shapes mancante"
-    assert shape_cube.name in {o.name for o in col_shapes.objects}, \
-        "CTRL_DEF_SHAPE_CUBE non e' collegata alla collezione CTRL_Shapes"
+    assert res == {'FINISHED'}, f"Rigenerazione con widget Cube fallita: {res}"
+    nomi = ("arm.L", "forearm.L", "hand.L")
+    for nm in nomi:
+        assert nm in arm_data.bones, f"Controller {nm} sparito dopo la rigenerazione"
+    assert not any(o.name.startswith("CTRL_DEF_SHAPE_") for o in bpy.data.objects), \
+        f"Shape interne create da CTRL_DEF: {[o.name for o in bpy.data.objects]}"
+    assert bpy.data.collections.get("CTRL_Shapes") is None, \
+        "Collezione interna CTRL_Shapes non piu' prevista: i widget sono di Bone Widget"
+    # Bone collection dei controller: "CTRLS", non piu' "CTRL"
+    assert arm_data.collections.get("CTRL") is None, \
+        "La bone collection dei controller non deve piu' chiamarsi CTRL"
+    bcoll = arm_data.collections.get("CTRLS")
+    assert bcoll is not None, "Bone collection CTRLS mancante"
+    ossa_col = {b.name for b in bcoll.bones}
+    for nm in nomi:
+        assert nm in ossa_col, f"{nm} non e' iscritto alla bone collection CTRLS: {ossa_col}"
 
-    # Doppia esecuzione: idempotente, non duplica ne' bone ne' shape
+    # Doppia esecuzione: idempotente, non duplica bone ne' shape interne
     ossa = len(arm_data.bones)
-    forme = len([o for o in bpy.data.objects if o.name.startswith("CTRL_DEF_SHAPE_")])
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
     res = bpy.ops.ctrl_def.generate()
     assert res == {'FINISHED'}, f"Seconda generazione fallita: {res}"
     assert len(arm_data.bones) == ossa, \
         f"Seconda generazione ha duplicato i bone: {ossa} -> {len(arm_data.bones)}"
-    assert len([o for o in bpy.data.objects if o.name.startswith("CTRL_DEF_SHAPE_")]) == forme, \
-        "Seconda generazione ha duplicato le shape condivise"
+    assert not any(o.name.startswith("CTRL_DEF_SHAPE_") for o in bpy.data.objects), \
+        "La seconda generazione non deve creare oggetti CTRL_DEF_SHAPE_*"
     reg = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
     assert len(reg) == 3, f"Registry duplicato dopo doppia esecuzione: {reg}"
 
@@ -393,12 +587,13 @@ def test_parent_chain_fk():
     _reset()
     stg = bpy.context.scene.ctrl_def_settings
     stg.parent = "CHAIN"
-    stg.shape = "CIRCLE"
+    stg.widget_name = "Circle"
     arm_obj, arm_data = _new_armature("RigParziale")
     bpy.ops.object.mode_set(mode='EDIT')
     _build_chain(arm_data)
-    arm_data.edit_bones["DEF_forearm.L"].select = False
     bpy.ops.object.mode_set(mode='OBJECT')
+    # Solo DEF_arm.L e DEF_hand.L selezionati: DEF_forearm.L resta fuori
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_hand.L"))
     res = bpy.ops.ctrl_def.generate()
     assert res == {'FINISHED'}, f"Selezione parziale fallita: {res}"
     assert "arm.L" in arm_data.bones, "arm.L non creato con selezione parziale"
@@ -432,9 +627,11 @@ def test_parent_chain_fk():
     assert reg == {}, f"Registry non pulito dopo remove(): {reg}"
     assert "arm.L" not in arm_data.bones, "arm.L non rimosso da remove()"
     assert "DEF_arm.L" in arm_data.bones, "remove() non deve toccare i bone DEF"
-    # Nessun controller residuo: la shape condivisa non serve piu' e va eliminata
-    assert bpy.data.objects.get("CTRL_DEF_SHAPE_CIRCLE") is None, \
-        "La shape condivisa inutilizzata non e' stata eliminata da remove()"
+    # Nessun controller residuo: nessuna shape interna deve restare in scena
+    residui = [o.name for o in bpy.data.objects
+               if o.name.startswith("CTRL_DEF_SHAPE_")]
+    assert residui == [], \
+        f"Shape interne non eliminate da remove(): {residui}"
 
 
 def test_bind_actd_rotazione():
@@ -481,6 +678,20 @@ def test_bind_actd_rotazione():
     percorso_json = os.path.join(cartella, "ctrl_def_mapping.json")
     percorso_csv = os.path.join(cartella, "ctrl_def_mapping.csv")
     percorso_preset = os.path.join(cartella, "ctrl_def_preset.json")
+    # PR03: un controller registrato e poi cancellato a mano in Edit Mode non
+    # deve finire nell'export: _prepare_export pota il registry prima di leggerlo
+    mod = _addon_module()
+    bpy.ops.object.mode_set(mode='EDIT')
+    fantasma = arm_data.edit_bones.new("ghost.L")
+    fantasma.head = (0.0, 0.0, 3.0)
+    fantasma.tail = (0.0, 0.0, 3.2)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mod._mark_generated(arm_obj, "ghost.L", "DEF_ghost.L")
+    assert "ghost.L" in mod._read_registry(arm_obj), \
+        "Il controller orfano non e' finito nel registry prima dell'export"
+    bpy.ops.object.mode_set(mode='EDIT')
+    arm_data.edit_bones.remove(arm_data.edit_bones["ghost.L"])
+    bpy.ops.object.mode_set(mode='OBJECT')
     res_json = bpy.ops.ctrl_def.export_json(filepath=percorso_json)
     assert res_json == {'FINISHED'}, f"export_json fallito: {res_json}"
     assert os.path.isfile(percorso_json), f"JSON di export non creato: {percorso_json}"
@@ -488,12 +699,17 @@ def test_bind_actd_rotazione():
         mappa = json.load(file_json)
     assert mappa.get("armature") == arm_obj.name, \
         f"armature nel JSON: {mappa.get('armature')!r} invece di {arm_obj.name!r}"
-    assert mappa.get("version") == "0.1.2", \
-        f"version nel JSON: {mappa.get('version')!r} invece di '0.1.2'"
+    assert mappa.get("version") == "0.2.0", \
+        f"version nel JSON: {mappa.get('version')!r} invece di '0.2.0'"
     assert mappa["mapping"]["arm.L"]["def"] == "DEF_arm.L", \
         f"Mappatura arm.L errata nel JSON: {mappa['mapping'].get('arm.L')!r}"
     assert set(mappa["mapping"].keys()) == {"arm.L", "forearm.L", "hand.L"}, \
         f"Chiavi della mappatura inattese: {sorted(mappa['mapping'].keys())}"
+    assert "ghost.L" not in mappa["mapping"], \
+        f"Il controller cancellato a mano e' finito nell'export: {sorted(mappa['mapping'].keys())}"
+    registro_potato = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    assert "ghost.L" not in registro_potato, \
+        f"export_json non ha potato il controller cancellato a mano: {sorted(registro_potato.keys())}"
 
     res_csv = bpy.ops.ctrl_def.export_csv(filepath=percorso_csv)
     assert res_csv == {'FINISHED'}, f"export_csv fallito: {res_csv}"
@@ -509,7 +725,7 @@ def test_bind_actd_rotazione():
 
     # Preset utente: salva lo stato corrente, lo altera e lo ricarica dal file
     stg = bpy.context.scene.ctrl_def_settings
-    stg.shape = "CUBE"
+    stg.widget_name = "Cube"
     stg.scale = 0.8
     stg.prefix_ctrl = "CTRL_"
     res_save = bpy.ops.ctrl_def.save_preset(filepath=percorso_preset)
@@ -517,22 +733,46 @@ def test_bind_actd_rotazione():
     assert os.path.isfile(percorso_preset), f"Preset non creato: {percorso_preset}"
     with open(percorso_preset, "r", encoding="utf-8") as file_preset:
         preset = json.load(file_preset)
-    for chiave in ("prefix_def", "prefix_ctrl", "shape", "scale", "shape_rot",
-                   "color", "parent", "mirror"):
+    for chiave in ("prefix_def", "prefix_ctrl", "widget_name", "scale",
+                   "parent", "mirror"):
         assert chiave in preset, f"Chiave {chiave!r} assente nel preset: {preset}"
-    assert preset["shape"] == "CUBE", f"shape salvata errata: {preset['shape']!r}"
+    assert preset["widget_name"] == "Cube", \
+        f"widget_name salvato errato: {preset['widget_name']!r}"
+    assert "color" not in preset, \
+        f"Il preset non deve contenere la chiave morta 'color': {preset}"
+    assert "shape" not in preset, \
+        f"Il preset non deve piu' contenere la vecchia chiave 'shape': {preset}"
+    assert "shape_rot" not in preset, \
+        f"Il preset non deve contenere la chiave morta 'shape_rot': {preset}"
     assert abs(preset["scale"] - 0.8) < 1e-4, f"scale salvata errata: {preset['scale']!r}"
-    stg.shape = "CIRCLE"
+    stg.widget_name = "Circle"
     stg.scale = 1.0
     stg.prefix_ctrl = ""
     stg.mirror = True
     res_load = bpy.ops.ctrl_def.load_preset(filepath=percorso_preset)
     assert res_load == {'FINISHED'}, f"load_preset fallito: {res_load}"
-    assert stg.shape == "CUBE", f"shape non ripristinata dal preset: {stg.shape!r}"
+    assert stg.widget_name == "Cube", \
+        f"widget_name non ripristinato dal preset: {stg.widget_name!r}"
     assert abs(stg.scale - 0.8) < 1e-4, f"scale non ripristinata dal preset: {stg.scale}"
     assert stg.prefix_ctrl == "CTRL_", \
         f"prefix_ctrl non ripristinato dal preset: {stg.prefix_ctrl!r}"
     assert stg.mirror is False, f"mirror non ripristinato dal preset: {stg.mirror}"
+    # Fallback legacy: un preset salvato da una versione precedente puo'
+    # contenere "shape_rot" (controllo rimosso). Va ignorato, non fa fallire.
+    with open(percorso_preset, "w", encoding="utf-8") as file_legacy:
+        json.dump({"prefix_ctrl": "LEGACY_", "widget_name": "Sphere",
+                   "scale": 1.5, "shape_rot": [90.0, 0.0, 0.0]}, file_legacy)
+    res_legacy = bpy.ops.ctrl_def.load_preset(filepath=percorso_preset)
+    assert res_legacy == {'FINISHED'}, \
+        f"load_preset di un JSON legacy con shape_rot deve riuscire: {res_legacy}"
+    assert stg.widget_name == "Sphere", \
+        f"Chiavi note non applicate da un preset legacy: {stg.widget_name!r}"
+    assert abs(stg.scale - 1.5) < 1e-4, \
+        f"scale non applicata da un preset legacy: {stg.scale}"
+    assert stg.prefix_ctrl == "LEGACY_", \
+        f"prefix_ctrl non applicato da un preset legacy: {stg.prefix_ctrl!r}"
+    assert not hasattr(stg, "shape_rot"), \
+        "shape_rot non deve ricomparire caricando un preset legacy"
     for percorso in (percorso_json, percorso_csv, percorso_preset):
         if os.path.isfile(percorso):
             os.remove(percorso)
@@ -540,11 +780,25 @@ def test_bind_actd_rotazione():
 
     # Fase E: target IK rapido sulla catena di 3 controller arm.L ->
     # forearm.L -> hand.L gia' generata sopra (parent CHAIN).
-    bpy.ops.object.mode_set(mode='POSE')
+    # La selezione si legge in Pose Mode sull'armatura attiva: si usa la stessa
+    # funzione dell'addon, cosi' test e operatore partono dallo stesso stato.
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
     for nm in ("arm.L", "forearm.L", "hand.L"):
         pbone = arm_obj.pose.bones.get(nm)
         assert pbone is not None, f"Controller {nm} assente prima di add_ik"
+    registro_ik = mod._read_registry(arm_obj)
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        assert nm in registro_ik, f"Controller {nm} non registrato prima di add_ik: {sorted(registro_ik)}"
     _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    # Stessa sorgente di lettura dell'operatore: pose bone selezionati.
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones[nm]
+        assert pbone.select is True, f"Pose bone {nm} non selezionato dopo _seleziona_posa"
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
     res_ik = bpy.ops.ctrl_def.add_ik()
     assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
     bone_ik = arm_data.bones.get("IK_hand.L")
@@ -561,45 +815,146 @@ def test_bind_actd_rotazione():
     assert con_ik.chain_count == 3, \
         f"chain_count del constraint IK: {con_ik.chain_count} invece di 3"
     assert con_ik.use_tail is True, "use_tail del constraint IK non attivo"
-    # Nessun controller selezionato: l'operatore rifiuta l'operazione
-    bpy.ops.object.mode_set(mode='POSE')
+    # Nessun controller selezionato: l'operatore rifiuta l'operazione.
+    # Il rifiuto arriva con report ERROR, quindi bpy.ops rilancia RuntimeError:
+    # va intercettato, altrimenti il verdetto CANCELLED non e' osservabile.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     _seleziona_posa(arm_obj, None, False)
-    res_ik_vuoto = bpy.ops.ctrl_def.add_ik()
+    assert mod._selected_ctrl_chains(arm_obj) == [], \
+        "La catena resta leggibile con tutti i controller deselezionati"
+    res_ik_vuoto = None
+    try:
+        res_ik_vuoto = bpy.ops.ctrl_def.add_ik()
+    except RuntimeError as exc:
+        assert "No 2-3 controller chain selected" in str(exc), \
+            f"Messaggio di rifiuto inatteso da add_ik: {exc}"
+        res_ik_vuoto = {'CANCELLED'}
     assert res_ik_vuoto == {'CANCELLED'}, \
         f"add_ik senza controller selezionati: {res_ik_vuoto} invece di {{'CANCELLED'}}"
     # Una catena di 2 anelli (forearm.L -> hand.L) e' supportata
-    bpy.ops.object.mode_set(mode='POSE')
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     _seleziona_posa(arm_obj, ("forearm.L", "hand.L"), True)
+    assert mod._selected_ctrl_chains(arm_obj) == [["forearm.L", "hand.L"]], \
+        f"Catena di 2 letta da _selected_ctrl_chains: {mod._selected_ctrl_chains(arm_obj)}"
     res_ik_due = bpy.ops.ctrl_def.add_ik()
     assert res_ik_due == {'FINISHED'}, f"add_ik su catena di 2 anelli: {res_ik_due}"
     con_ik_due = arm_obj.pose.bones["forearm.L"].constraints.get("CTRL_DEF_IK")
     assert con_ik_due is not None, "Constraint CTRL_DEF_IK mancante su forearm.L (catena di 2)"
     assert con_ik_due.chain_count == 2, \
         f"chain_count della catena di 2: {con_ik_due.chain_count} invece di 2"
+
+    # IK01/IK02: remove() deve portare via anche i target IK (compreso _pole)
+    # e i constraint rimasti a puntare ai controller rimossi.
+    mod._add_ik_target_chain(arm_obj, "IK", ["arm.L", "forearm.L", "hand.L"],
+                             pole=True)
+    assert arm_data.bones.get("IK_hand.L_pole") is not None, \
+        "Target IK_hand.L_pole non creato con pole=True"
+    assert arm_obj.pose.bones["arm.L"].constraints["CTRL_DEF_IK"].pole_subtarget \
+        == "IK_hand.L_pole", "pole_subtarget del constraint IK non punta al target pole"
+    res_remove_ik = bpy.ops.ctrl_def.remove()
+    assert res_remove_ik == {'FINISHED'}, \
+        f"remove() fallito con target IK presenti: {res_remove_ik}"
+    assert arm_data.bones.get("IK_hand.L") is None, \
+        "remove() ha lasciato il target IK_hand.L orfano"
+    assert arm_data.bones.get("IK_hand.L_pole") is None, \
+        "remove() ha lasciato il target IK_hand.L_pole orfano"
+    nomi_rimossi = ("arm.L", "forearm.L", "hand.L", "IK_hand.L", "IK_hand.L_pole")
+    for pbone in arm_obj.pose.bones:
+        for con in pbone.constraints:
+            assert con.name not in ("CTRL_DEF_COPY_TRANSFORMS", "CTRL_DEF_IK"), \
+                f"Constraint {con.name} sopravvissuto su {pbone.name} dopo remove()"
+            assert getattr(con, "subtarget", "") not in nomi_rimossi, \
+                f"Constraint {con.name} su {pbone.name} punta ancora a " \
+                f"{getattr(con, 'subtarget', '')!r} dopo remove()"
+    assert mod._read_registry(arm_obj) == {}, \
+        f"Registry non vuoto dopo remove(): {mod._read_registry(arm_obj)}"
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
 def test_presets():
     _reset()
     stg = bpy.context.scene.ctrl_def_settings
+    # PR01/PR02: il preset utente vive nelle impostazioni di scena, quindi si
+    # salva e si carica anche senza armatura e senza controller generati.
+    cartella_preset = tempfile.mkdtemp(prefix="ctrl_def_preset_vuoto_")
+    percorso_vuoto = os.path.join(cartella_preset, "ctrl_def_preset.json")
+    stg.widget_name = "Arrow"
+    stg.scale = 1.7
+    res_save_vuoto = bpy.ops.ctrl_def.save_preset(filepath=percorso_vuoto)
+    assert res_save_vuoto == {'FINISHED'}, \
+        f"save_preset fallito a registro vuoto: {res_save_vuoto}"
+    stg.widget_name = "Circle"
+    stg.scale = 1.0
+    res_load_vuoto = bpy.ops.ctrl_def.load_preset(filepath=percorso_vuoto)
+    assert res_load_vuoto == {'FINISHED'}, \
+        f"load_preset fallito a registro vuoto (serve solo la scena): {res_load_vuoto}"
+    assert stg.widget_name == "Arrow" and abs(stg.scale - 1.7) < 1e-4, \
+        f"Preset non applicato a registro vuoto: {stg.widget_name!r}, {stg.scale}"
+    # Un file di mappatura non e' un preset: va rifiutato, non applicato a meta'
+    with open(percorso_vuoto, "w", encoding="utf-8") as file_mappa:
+        json.dump({"version": "0.2.0", "armature": "Rig",
+                   "mapping": {"arm.L": {"def": "DEF_arm.L"}}}, file_mappa)
+    stg.widget_name = "Circle"
+    res_mappa = None
+    try:
+        res_mappa = bpy.ops.ctrl_def.load_preset(filepath=percorso_vuoto)
+    except RuntimeError:
+        # Il report ERROR dell'operatore arriva come RuntimeError via bpy.ops
+        res_mappa = {'CANCELLED'}
+    assert res_mappa == {'CANCELLED'}, \
+        f"load_preset di un file di mappatura: {res_mappa} invece di {{'CANCELLED'}}"
+    assert stg.widget_name == "Circle", \
+        f"load_preset ha applicato un file di mappatura: widget {stg.widget_name!r}"
+    os.remove(percorso_vuoto)
+    os.rmdir(cartella_preset)
+    # GC EnumProperty + update=: cambiare la tendina Preset applica subito i
+    # valori, senza dover premere un secondo bottone
+    stg.widget_name = "Circle"
+    stg.scale = 1.0
+    stg.parent = "CHAIN"
+    stg.mirror = False
+    stg.preset = "BIPED_LIMB"
+    assert stg.widget_name == "Cube", \
+        f"preset non applicato dall'update della tendina: {stg.widget_name!r}"
+    assert abs(stg.scale - 0.8) < 1e-4, \
+        f"scale non applicata dall'update della tendina: {stg.scale}"
+    assert stg.parent == "CHAIN", \
+        f"parent non applicato dall'update della tendina: {stg.parent!r}"
+    assert stg.mirror is True, \
+        f"mirror non applicato dall'update della tendina: {stg.mirror}"
     attesi = {
-        "DEFAULT": ("CIRCLE", 1.0, "NONE", "CHAIN", False, (0.0, 0.0, 0.0)),
-        "BIPED_LIMB": ("CUBE", 0.8, "RED", "CHAIN", True, (0.0, 0.0, 0.0)),
-        "ROOT_CTRL": ("ARROW", 2.0, "BLUE", "ROOT", False, (90.0, 0.0, 0.0)),
-        "FACE": ("SPHERE", 0.3, "GREEN", "BONE", True, (90.0, 0.0, 0.0)),
+        "DEFAULT": ("Circle", 1.0, "CHAIN", False),
+        "BIPED_LIMB": ("Cube", 0.8, "CHAIN", True),
+        "ROOT_CTRL": ("Arrow", 2.0, "ROOT", False),
+        "FACE": ("Sphere", 0.3, "BONE", True),
     }
-    for nome, (shape, scale, color, parent, mirror, rot) in attesi.items():
+    for nome, (widget, scale, parent, mirror) in attesi.items():
         stg.preset = nome
+        # Con update= la tendina applica subito i valori
+        assert (stg.widget_name, stg.parent, stg.mirror) == (widget, parent, mirror) \
+            and abs(stg.scale - scale) < 1e-4, \
+            f"Preset {nome} non applicato dall'update della tendina: " \
+            f"{stg.widget_name!r}, {stg.scale}, {stg.parent!r}, {stg.mirror}"
         res = bpy.ops.ctrl_def.apply_preset()
         assert res == {'FINISHED'}, f"apply_preset fallito per {nome}: {res}"
-        assert stg.shape == shape, f"Preset {nome}: shape {stg.shape!r} invece di {shape!r}"
+        assert stg.widget_name == widget, \
+            f"Preset {nome}: widget_name {stg.widget_name!r} invece di {widget!r}"
         assert abs(stg.scale - scale) < 1e-4, f"Preset {nome}: scale {stg.scale} invece di {scale}"
-        assert stg.color == color, f"Preset {nome}: color {stg.color!r} invece di {color!r}"
         assert stg.parent == parent, f"Preset {nome}: parent {stg.parent!r} invece di {parent!r}"
         assert stg.mirror is mirror, f"Preset {nome}: mirror {stg.mirror} invece di {mirror}"
-        for i in range(3):
-            assert abs(stg.shape_rot[i] - rot[i]) < 1e-4, \
-                f"Preset {nome}: shape_rot[{i}] = {stg.shape_rot[i]} invece di {rot[i]}"
+        # Il colore non fa piu' parte dei preset (lo gestisce Bone Widget)
+        assert not hasattr(stg, "color"), \
+            f"Preset {nome}: la proprieta' morta 'color' non deve esistere"
+    # Nessun preset deve promettere una rotazione del widget che CTRL_DEF non fa
+    mod_preset = _addon_module()
+    for nome, valori in mod_preset._PRESETS.items():
+        assert "shape_rot" not in valori, \
+            f"Preset {nome}: la chiave morta 'shape_rot' non deve esistere: {valori}"
+        assert "color" not in valori, \
+            f"Preset {nome}: la chiave morta 'color' non deve esistere: {valori}"
+    stg_preset = bpy.context.scene.ctrl_def_settings
+    assert not hasattr(stg_preset, "shape_rot"), \
+        "shape_rot non deve piu' esistere nelle impostazioni dopo apply_preset"
 
     # Fase B: Diagnostica Pre-Flight (ctrl_def.diagnose + _diagnose_def_selection)
     _reset()
@@ -679,10 +1034,7 @@ def _registra_addon_se_mancante():
     """
     if hasattr(bpy.ops.ctrl_def, "generate"):
         return None
-    spec = importlib.util.spec_from_file_location("ctrl_def", _PATH_ADDON)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["ctrl_def"] = mod
-    spec.loader.exec_module(mod)
+    mod = _addon_module()
     mod.register()
     return mod
 

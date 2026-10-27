@@ -7,8 +7,7 @@ from bpy.types import Operator
 
 from .ctrl_def_i18n import tr
 from .ctrl_def_registry import _mark_generated
-from .ctrl_def_shapes import (_ensure_collection, _get_or_create_shape,
-                              _is_def_bone, _mirror_name)
+from .ctrl_def_shapes import _is_def_bone, _mirror_name
 
 # ===========================================================================
 # Helper della generazione controller (usati da CTRLDEF_OT_generate)
@@ -115,39 +114,23 @@ def _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg):
 
 
 def _configure_ctrl_pose_bones(arm, created, stg):
-    """In Object Mode applica shape, scala, colore e registro ai pose bone.
+    """In Object Mode assegna la bone collection e iscrive i pose bone.
 
-    Assicura la collezione oggetti "CTRL_Shapes" e la Bone Collection "CTRL",
-    usa una custom shape condivisa per forma e iscrive ogni coppia nel
-    registro JSON con _mark_generated. Restituisce il numero di controller
-    configurati.
+    Assicura la Bone Collection "CTRLS" e iscrive ogni coppia nel registro
+    JSON con _mark_generated. Colore e custom shape non sono piu' gestiti qui:
+    colore e widget li governa l'estensione opzionale Bone Widget. Restituisce
+    il numero di controller configurati.
     """
-    # Le forme sono oggetti mesh usati solo come custom_shape dei pose bone
-    col = _ensure_collection()
-    # Tutti i controller generati finiscono nella bone collection "CTRL"
-    bcoll = arm.data.collections.get("CTRL")
+    # Tutti i controller generati finiscono nella bone collection "CTRLS"
+    bcoll = arm.data.collections.get("CTRLS")
     if bcoll is None:
-        bcoll = arm.data.collections.new("CTRL")
-    # Palette colore in funzione dell'opzione del pannello
-    palette = {"RED": "THEME04", "GREEN": "THEME07", "BLUE": "THEME12"}.get(stg.color)
+        bcoll = arm.data.collections.new("CTRLS")
     for name, def_name in created:
         bone = arm.data.bones.get(name)
         pbone = arm.pose.bones.get(name)
         if pbone is None:
             continue
-        # Shape condivisa per forma: ricalcolata a ogni generate, così un
-        # cambio di forma aggiorna anche i controller già esistenti
-        pbone.custom_shape = _get_or_create_shape(stg.shape, col)
-        pbone.custom_shape_scale_xyz = (stg.scale, stg.scale, stg.scale)
-        # Rotazione locale della shape in radianti (Blender usa i radianti)
-        if hasattr(pbone, "custom_shape_rotation_euler"):
-            rot = stg.shape_rot
-            pbone.custom_shape_rotation_euler = (
-                math.radians(rot[0]), math.radians(rot[1]), math.radians(rot[2]))
-        # Colore del controller (se scelto un colore non NONE)
-        if palette:
-            pbone.color.palette = palette
-        # Iscrizione alla bone collection "CTRL"
+        # Iscrizione alla bone collection "CTRLS"
         if bone is not None and bcoll.name not in (c.name for c in bone.collections):
             bcoll.assign(bone)
         _mark_generated(arm, name, def_name)
@@ -161,6 +144,11 @@ class CTRLDEF_OT_generate(Operator):
     bl_idname = "ctrl_def.generate"
     bl_label = tr("op.generate")
     bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def description(cls, context, properties):
+        # Tooltip dinamico: segue la lingua attiva a ogni passaggio del mouse.
+        return tr("tip.op.generate")
 
     def execute(self, context):
         stg = context.scene.ctrl_def_settings
@@ -181,6 +169,11 @@ class CTRLDEF_OT_generate(Operator):
         _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg)
         bpy.ops.object.mode_set(mode='OBJECT')
         n_ctrl = _configure_ctrl_pose_bones(arm, created, stg)
+        # I widget non nascono con i controller: li crea l'utente a parte con
+        # ctrl_def.create_widget, quando Bone Widget e' disponibile.
+        # Il widget si assegna in Pose Mode: si torna in Object Mode
+        if arm.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
         self.report({'INFO'}, tr("msg.created") + ": " + str(n_ctrl))
         return {'FINISHED'}
 
