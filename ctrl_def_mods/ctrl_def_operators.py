@@ -1,8 +1,13 @@
-# Modulo operatori: preset, rimozione, binding ACTD e diagnostica pre-flight.
+# Modulo operatori: preset, rimozione, binding ACTD, diagnostica pre-flight,
+# export della mappa CTRL->DEF e preset utente JSON.
+import csv
 import json
+import sys
 
 import bpy
+from bpy.props import StringProperty
 from bpy.types import Operator
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from .ctrl_def_i18n import tr
 from .ctrl_def_registry import _forget_generated, _read_registry
@@ -304,6 +309,196 @@ class CTRLDEF_OT_diagnose(Operator):
             self.report({'INFO'}, tr("msg.diag_ok"))
         else:
             self.report({'WARNING'}, tr("msg.diag_issues") + ": " + str(totale))
+        return {'FINISHED'}
+
+
+# ===========================================================================
+# Export mappa CTRL->DEF e preset utente JSON (Fase D)
+# ===========================================================================
+def _export_rows(arm, data):
+    """Righe (ctrl, def, deform, registrato) del registro per export."""
+    righe = []
+    for ctrl_name, voce in data.items():
+        def_name = voce.get("def", "") if isinstance(voce, dict) else ""
+        # use_deform si legge dal bone DEF: i controller sono sempre non-deform
+        bone = arm.data.bones.get(def_name)
+        use_deform = bool(bone.use_deform) if bone is not None else False
+        righe.append((ctrl_name, def_name, use_deform, True))
+    return righe
+
+
+def _addon_version():
+    """Versione dell'addon come stringa "X.Y.Z" letta da bl_info del package."""
+    pacchetto = __package__ or ""
+    parti = pacchetto.split(".") if pacchetto else []
+    # Dal package piu' profondo alla radice: il primo con bl_info vince
+    candidati = [".".join(parti[:i]) for i in range(len(parti), -1, -1)]
+    candidati.extend(("ctrl_def_addon", "ctrl_def_src", "ctrl_def"))
+    for nome in candidati:
+        modulo = sys.modules.get(nome) if nome else None
+        info = getattr(modulo, "bl_info", None)
+        if isinstance(info, dict) and info.get("version"):
+            return ".".join(str(numero) for numero in info["version"])
+    return "0.0.0"
+
+
+# Proprieta' di CTRLDEF_PG_settings serializzate nel preset utente
+_SETTINGS_KEYS = ("prefix_def", "prefix_ctrl", "shape", "scale", "shape_rot",
+                  "color", "parent", "mirror")
+
+
+def _settings_values(stg):
+    """Dizionario dei valori correnti delle impostazioni (JSON-serializzabile)."""
+    valori = {}
+    for chiave in _SETTINGS_KEYS:
+        valore = getattr(stg, chiave)
+        if chiave == "shape_rot":
+            valore = list(valore)
+        valori[chiave] = valore
+    return valori
+
+
+def _apply_settings_values(stg, valori):
+    """Applica al PropertyGroup i valori del preset, ignorando chiavi ignote."""
+    for chiave in _SETTINGS_KEYS:
+        if chiave not in valori:
+            continue
+        valore = valori[chiave]
+        if chiave == "shape_rot":
+            valore = tuple(valore)
+        setattr(stg, chiave, valore)
+    return stg
+
+
+def _prepare_export(op, context):
+    """Controlli comuni: armatura attiva e registro non vuoto.
+
+    Restituisce (arm, data) oppure (None, None) dopo aver riportato l'errore.
+    """
+    arm = context.active_object
+    if arm is None or arm.type != "ARMATURE":
+        op.report({'ERROR'}, tr("msg.no_armature"))
+        return None, None
+    data = _read_registry(arm)
+    if not data:
+        op.report({'WARNING'}, tr("msg.no_registered"))
+        return None, None
+    return arm, data
+
+
+class CTRLDEF_OT_export_json(Operator, ExportHelper):
+    bl_idname = "ctrl_def.export_json"
+    bl_label = tr("op.export_json")
+    bl_options = {'REGISTER'}
+
+    filename_ext = ".json"
+    filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        # Proposta accanto al .blend, senza salvare nulla a mano
+        self.filepath = "//ctrl_def_mapping.json"
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        arm, data = _prepare_export(self, context)
+        if arm is None:
+            return {'CANCELLED'}
+        contenuto = {"version": _addon_version(), "armature": arm.name,
+                     "mapping": data}
+        try:
+            with open(self.filepath, "w", encoding="utf-8") as file_out:
+                json.dump(contenuto, file_out, indent=2, ensure_ascii=False)
+        except (OSError, TypeError) as exc:
+            self.report({'ERROR'}, tr("msg.export_failed") + ": " + str(exc))
+            return {'CANCELLED'}
+        self.report({'INFO'}, tr("msg.exported") + ": " + self.filepath)
+        return {'FINISHED'}
+
+
+class CTRLDEF_OT_export_csv(Operator, ExportHelper):
+    bl_idname = "ctrl_def.export_csv"
+    bl_label = tr("op.export_csv")
+    bl_options = {'REGISTER'}
+
+    filename_ext = ".csv"
+    filter_glob: StringProperty(default="*.csv", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        self.filepath = "//ctrl_def_mapping.csv"
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        arm, data = _prepare_export(self, context)
+        if arm is None:
+            return {'CANCELLED'}
+        try:
+            with open(self.filepath, "w", encoding="utf-8", newline="") as file_out:
+                writer = csv.writer(file_out)
+                writer.writerow(("ctrl", "def", "use_deform"))
+                for ctrl_name, def_name, use_deform, _reg in _export_rows(arm, data):
+                    writer.writerow((ctrl_name, def_name, int(use_deform)))
+        except OSError as exc:
+            self.report({'ERROR'}, tr("msg.export_failed") + ": " + str(exc))
+            return {'CANCELLED'}
+        self.report({'INFO'}, tr("msg.exported") + ": " + self.filepath)
+        return {'FINISHED'}
+
+
+class CTRLDEF_OT_save_preset(Operator, ExportHelper):
+    bl_idname = "ctrl_def.save_preset"
+    bl_label = tr("op.save_preset")
+    bl_options = {'REGISTER'}
+
+    filename_ext = ".json"
+    filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        self.filepath = "//ctrl_def_preset.json"
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        arm, _data = _prepare_export(self, context)
+        if arm is None:
+            return {'CANCELLED'}
+        stg = context.scene.ctrl_def_settings
+        try:
+            with open(self.filepath, "w", encoding="utf-8") as file_out:
+                json.dump(_settings_values(stg), file_out, indent=2,
+                          ensure_ascii=False)
+        except (OSError, TypeError) as exc:
+            self.report({'ERROR'}, tr("msg.export_failed") + ": " + str(exc))
+            return {'CANCELLED'}
+        self.report({'INFO'}, tr("msg.exported") + ": " + self.filepath)
+        return {'FINISHED'}
+
+
+class CTRLDEF_OT_load_preset(Operator, ImportHelper):
+    bl_idname = "ctrl_def.load_preset"
+    bl_label = tr("op.load_preset")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filename_ext = ".json"
+    filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        self.filepath = "//ctrl_def_preset.json"
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        arm, _data = _prepare_export(self, context)
+        if arm is None:
+            return {'CANCELLED'}
+        try:
+            with open(self.filepath, "r", encoding="utf-8") as file_in:
+                valori = json.load(file_in)
+        except (OSError, ValueError) as exc:
+            self.report({'ERROR'}, tr("msg.export_failed") + ": " + str(exc))
+            return {'CANCELLED'}
+        if not isinstance(valori, dict):
+            self.report({'ERROR'}, tr("msg.export_failed") + ": " + self.filepath)
+            return {'CANCELLED'}
+        _apply_settings_values(context.scene.ctrl_def_settings, valori)
+        self.report({'INFO'}, tr("msg.loaded") + ": " + self.filepath)
         return {'FINISHED'}
 
 

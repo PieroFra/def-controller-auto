@@ -39,6 +39,16 @@ def _draw_settings(layout, stg):
     layout.separator()
 
 
+def _draw_export_box(layout):
+    """Export della mappa CTRL->DEF e preset utente su file."""
+    box = layout.box()
+    box.label(text=tr("panel.export"), icon='FILEBROWSER')
+    box.operator("ctrl_def.export_json", text=tr("op.export_json"), icon='EXPORT')
+    box.operator("ctrl_def.export_csv", text=tr("op.export_csv"), icon='EXPORT')
+    box.operator("ctrl_def.save_preset", text=tr("op.save_preset"), icon='FILE_TICK')
+    box.operator("ctrl_def.load_preset", text=tr("op.load_preset"), icon='FILEBROWSER')
+
+
 def _draw_actions(layout):
     """Pulsanti delle operazioni principali."""
     layout.operator("ctrl_def.generate", text=tr("op.generate"), icon='BONE_DATA')
@@ -62,6 +72,7 @@ class CTRLDEF_PT_panel(Panel):
             _draw_stats_box(layout, arm, stg)
         _draw_preset_box(layout, stg)
         _draw_settings(layout, stg)
+        _draw_export_box(layout)
         _draw_actions(layout)
 
 

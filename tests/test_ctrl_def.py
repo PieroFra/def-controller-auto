@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sys
+import tempfile
 from mathutils import Vector
 
 # Percorso dell'addon (entry point del package) per il caricamento diretto
@@ -454,6 +455,69 @@ def test_bind_actd_rotazione():
     err = max(abs(diff[r][c]) for r in range(4) for c in range(4))
     bpy.ops.object.mode_set(mode='OBJECT')
     assert err < 1e-4, f"Matrice di DEF_arm.L diversa dal controller, delta={err}"
+
+    # Fase D: round-trip di export mappa CTRL->DEF (JSON/CSV) e preset utente.
+    # Gli operatori girano senza file browser impostando filepath direttamente.
+    cartella = tempfile.mkdtemp(prefix="ctrl_def_export_")
+    percorso_json = os.path.join(cartella, "ctrl_def_mapping.json")
+    percorso_csv = os.path.join(cartella, "ctrl_def_mapping.csv")
+    percorso_preset = os.path.join(cartella, "ctrl_def_preset.json")
+    res_json = bpy.ops.ctrl_def.export_json(filepath=percorso_json)
+    assert res_json == {'FINISHED'}, f"export_json fallito: {res_json}"
+    assert os.path.isfile(percorso_json), f"JSON di export non creato: {percorso_json}"
+    with open(percorso_json, "r", encoding="utf-8") as file_json:
+        mappa = json.load(file_json)
+    assert mappa.get("armature") == arm_obj.name, \
+        f"armature nel JSON: {mappa.get('armature')!r} invece di {arm_obj.name!r}"
+    assert mappa.get("version") == "0.1.2", \
+        f"version nel JSON: {mappa.get('version')!r} invece di '0.1.2'"
+    assert mappa["mapping"]["arm.L"]["def"] == "DEF_arm.L", \
+        f"Mappatura arm.L errata nel JSON: {mappa['mapping'].get('arm.L')!r}"
+    assert set(mappa["mapping"].keys()) == {"arm.L", "forearm.L", "hand.L"}, \
+        f"Chiavi della mappatura inattese: {sorted(mappa['mapping'].keys())}"
+
+    res_csv = bpy.ops.ctrl_def.export_csv(filepath=percorso_csv)
+    assert res_csv == {'FINISHED'}, f"export_csv fallito: {res_csv}"
+    assert os.path.isfile(percorso_csv), f"CSV di export non creato: {percorso_csv}"
+    with open(percorso_csv, "r", encoding="utf-8", newline="") as file_csv:
+        righe_csv = file_csv.read().splitlines()
+    assert righe_csv[0] == "ctrl,def,use_deform", \
+        f"Intestazione CSV inattesa: {righe_csv[0]!r}"
+    assert len(righe_csv) == 4, f"Righe CSV attese 4 (intestazione + 3), trovate {righe_csv}"
+    riga_arm = [r for r in righe_csv[1:] if r.startswith("arm.L,")]
+    assert riga_arm == ["arm.L,DEF_arm.L,1"], \
+        f"Riga CSV di arm.L inattesa: {riga_arm}"
+
+    # Preset utente: salva lo stato corrente, lo altera e lo ricarica dal file
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.shape = "CUBE"
+    stg.scale = 0.8
+    stg.prefix_ctrl = "CTRL_"
+    res_save = bpy.ops.ctrl_def.save_preset(filepath=percorso_preset)
+    assert res_save == {'FINISHED'}, f"save_preset fallito: {res_save}"
+    assert os.path.isfile(percorso_preset), f"Preset non creato: {percorso_preset}"
+    with open(percorso_preset, "r", encoding="utf-8") as file_preset:
+        preset = json.load(file_preset)
+    for chiave in ("prefix_def", "prefix_ctrl", "shape", "scale", "shape_rot",
+                   "color", "parent", "mirror"):
+        assert chiave in preset, f"Chiave {chiave!r} assente nel preset: {preset}"
+    assert preset["shape"] == "CUBE", f"shape salvata errata: {preset['shape']!r}"
+    assert abs(preset["scale"] - 0.8) < 1e-4, f"scale salvata errata: {preset['scale']!r}"
+    stg.shape = "CIRCLE"
+    stg.scale = 1.0
+    stg.prefix_ctrl = ""
+    stg.mirror = True
+    res_load = bpy.ops.ctrl_def.load_preset(filepath=percorso_preset)
+    assert res_load == {'FINISHED'}, f"load_preset fallito: {res_load}"
+    assert stg.shape == "CUBE", f"shape non ripristinata dal preset: {stg.shape!r}"
+    assert abs(stg.scale - 0.8) < 1e-4, f"scale non ripristinata dal preset: {stg.scale}"
+    assert stg.prefix_ctrl == "CTRL_", \
+        f"prefix_ctrl non ripristinato dal preset: {stg.prefix_ctrl!r}"
+    assert stg.mirror is False, f"mirror non ripristinato dal preset: {stg.mirror}"
+    for percorso in (percorso_json, percorso_csv, percorso_preset):
+        if os.path.isfile(percorso):
+            os.remove(percorso)
+    os.rmdir(cartella)
 
 
 def test_presets():
