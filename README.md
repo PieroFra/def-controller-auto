@@ -6,6 +6,7 @@
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
 [![Version](https://img.shields.io/badge/version-0.1.2-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
+[![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 
 Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — clean FK hierarchy, zero Dependency Cycles and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF).
 
@@ -17,6 +18,7 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 | **Author** | **Pierfrancesco Diodato** |
 | **Type** | Add-on (installable ZIP or folder) |
 | **License** | GPL-3.0-or-later |
+| **Official page** | [Blender Extensions — ctrl-def](https://extensions.blender.org/add-ons/ctrl-def/) |
 
 ---
 
@@ -150,6 +152,8 @@ Compress-Archive -Path __init__.py, blender_manifest.toml, README.md, README.it.
 ```
 
 **Alternatively:** download the package directly (with its `.sha256` checksum file) from the [Releases](https://github.com/PieroFra/def-controller-auto/releases) page.
+
+**Official page on Blender Extensions:** <https://extensions.blender.org/add-ons/ctrl-def/> — the extension is approved and installable directly from Blender 4.2+: *Edit > Preferences > Get Extensions*, search **"DEF Controller Auto"** and click *Install*.
 
 **Installing in Blender:** *Edit > Preferences > Add-ons > Install from Disk...*, select the ZIP (or the extracted folder), enable **DEF Controller Auto** and find the panel in the **3D Sidebar (`N` key) → "DEF Ctrl" tab**.
 
