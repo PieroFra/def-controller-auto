@@ -7,6 +7,7 @@
 [![Version](https://img.shields.io/badge/version-0.2.0-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 
 Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — clean FK hierarchy, zero Dependency Cycles, a modular `ctrl_def_mods\` package (`v0.2.0`) and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF).
 
