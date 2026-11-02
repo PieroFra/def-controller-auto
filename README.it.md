@@ -257,3 +257,15 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 ## 📄 Licenza
 
 GPL-3.0-or-later — vedi il file [LICENSE](LICENSE).
+
+
+---
+
+## Parte della Rigging Suite
+
+CTRL_DEF è totalmente standalone (zero dipendenze), ma si unifica automaticamente nella scheda **Rigging Suite** quando installato insieme a:
+
+- **[BBone to Bones](https://github.com/PieroFra/bbone-to-bones)** - converte le Bendy Bones in catene di ossa standard esportabili su Unity, Unreal e Godot, con Revert non distruttivo.
+- **[A.C.T.D.](https://github.com/PieroFra/auto-copy-transforms-def) (Auto Copy Transforms DEF)** - riusa le ossa come sorgenti di trasformazioni non distruttive con constraint auto-prefissati.
+
+Quale passaggio del tuo workflow di rigging ti rallenta ancora? Apri una issue con il passaggio che vuoi automatizzare.
