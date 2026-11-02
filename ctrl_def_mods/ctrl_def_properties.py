@@ -20,6 +20,19 @@ from .ctrl_def_i18n import tr
 _ITEMS_CACHE = []
 
 
+def _cache_items(slot, voci):
+    """Trattiene l'elenco di una callback nella sua cella della cache.
+
+    La cache e' una lista con una cella per callback: aggiornare una cella non
+    svuota le altre, cosi' gli elenchi restituiti da _items_parent,
+    _items_preset e _items_pipeline restano tutti referenziati.
+    """
+    while len(_ITEMS_CACHE) <= slot:
+        _ITEMS_CACHE.append([])
+    _ITEMS_CACHE[slot] = voci
+    return voci
+
+
 def _items_parent(self, context):
     """Modalita' di parenting dei controller generati."""
     voci = [
@@ -29,10 +42,9 @@ def _items_parent(self, context):
         ("NONE", tr("parent.none"), tr("parent.none_tip")),
         ("DEF", tr("parent.def"), tr("parent.def_tip")),
     ]
-    # La cache si sostituisce a ogni chiamata: le etichette restano tradotte
-    # nella lingua corrente, ma l'ultimo elenco non viene liberato.
-    _ITEMS_CACHE[:] = [voci]
-    return voci
+    # La cache si aggiorna nella cella di questa callback: le etichette restano
+    # tradotte nella lingua corrente e gli elenchi delle altre callback restano.
+    return _cache_items(0, voci)
 
 
 def _items_preset(self, context):
@@ -43,8 +55,40 @@ def _items_preset(self, context):
         ("ROOT_CTRL", tr("preset.root"), ""),
         ("FACE", tr("preset.face"), ""),
     ]
-    _ITEMS_CACHE[:] = [voci]
-    return voci
+    return _cache_items(1, voci)
+
+
+def _items_pipeline(self, context):
+    """Pipeline di trasformazione tra layer: DEF, ORG, MCH, CTRL."""
+    voci = [
+        ("DEF_CTRL", tr("pipeline.def_ctrl"), ""),
+        ("DEF_MCH_CTRL", tr("pipeline.def_mch_ctrl"), ""),
+        ("DEF_ORG_MCH_CTRL", tr("pipeline.def_org_mch_ctrl"), ""),
+        ("MCH_ORG", tr("pipeline.mch_org"), ""),
+        ("ORG_CTRL", tr("pipeline.org_ctrl"), ""),
+        ("CUSTOM", tr("pipeline.custom"), ""),
+    ]
+    return _cache_items(2, voci)
+
+
+def _on_pipeline_update(self, context):
+    """Allinea i prefissi DEF/CTRL alla pipeline scelta.
+
+    CUSTOM non tocca i prefissi: l'utente li imposta a mano.
+    """
+    modo = self.pipeline_mode
+    if modo == "DEF_CTRL":
+        self.prefix_def = "DEF_"
+        self.prefix_ctrl = ""
+    elif modo == "MCH_ORG":
+        self.prefix_def = "MCH_"
+        self.prefix_ctrl = "ORG_"
+    elif modo == "ORG_CTRL":
+        self.prefix_def = "ORG_"
+        self.prefix_ctrl = ""
+    elif modo in ("DEF_MCH_CTRL", "DEF_ORG_MCH_CTRL"):
+        self.prefix_def = "DEF_"
+        self.prefix_ctrl = ""
 
 
 def _on_preset_update(self, context):
@@ -98,5 +142,20 @@ class CTRLDEF_PG_settings(PropertyGroup):
         description=tr("tip.prop.preset"),
         items=_items_preset,
         update=_on_preset_update)
+    # Default = prima voce della callback: DEF_CTRL (prefissi DEF_ / CTRL vuoto)
+    pipeline_mode: EnumProperty(
+        name=tr("panel.pipeline"),
+        description=tr("tip.prop.pipeline"),
+        items=_items_pipeline,
+        update=_on_pipeline_update)
+    lock_mch_org: BoolProperty(
+        name=tr("panel.lock_mch_org"), default=True,
+        description=tr("tip.prop.lock_mch_org"))
+    ik_align_world_y: BoolProperty(
+        name=tr("panel.ik_align_y"), default=True,
+        description=tr("tip.prop.ik_align_y"))
+    ik_create_pole: BoolProperty(
+        name=tr("panel.ik_pole"), default=False,
+        description=tr("tip.prop.ik_pole"))
 
 

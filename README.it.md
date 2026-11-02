@@ -1,25 +1,36 @@
 **[🇬🇧 English](README.md) | 🇮🇹 Italiano**
 
-# CTRL_DEF — DEF Controller Auto
+# CTRL_DEF — Auto Rig Layers (DEF / MCH / ORG / CTRL)
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
-[![Version](https://img.shields.io/badge/version-0.2.0-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 
-Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`), con gerarchia FK pulita, zero Dependency Cycle, package modulare `ctrl_def_mods\` (`v0.2.0`) e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF).
+Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`) — **Auto Rig Layers** (`v0.3.0`): pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycle.
 
 | | |
 |---|---|
 | **Compatibilità** | **Blender 4.2 LTS — 5.2+** |
 | **Categoria** | **Rigging** |
-| **Versione** | **0.2.0** |
+| **Versione** | **0.3.0** |
 | **Autore** | **Pierfrancesco Diodato** |
 | **Tipo** | Add-on (ZIP installabile o cartella) |
 | **Licenza** | GPL-3.0-or-later |
 | **Pagina ufficiale** | [Blender Extensions — ctrl-def](https://extensions.blender.org/add-ons/ctrl-def/) |
+
+---
+
+## 🆕 Novità della v0.3.0 (rispetto alla v0.2.0)
+
+| Funzionalità | v0.2.0 | v0.3.0 |
+|---|---|---|
+| **Pipeline di Rigging** | Solo `DEF -> CTRL` diretta | Multi-Livello `DEF -> ORG -> MCH -> CTRL`, `DEF -> MCH -> CTRL`, `MCH -> ORG`, `ORG -> CTRL`, `Custom` |
+| **Livelli intermedi (`MCH` / `ORG`)** | Setup manuale | Bone Collection `MCH` e `ORG` automatiche, auto-nascoste con lock di Location/Rotation/Scale (`lock_mch_org`) |
+| **Orientamento del target IK** | Roll locale del bone ereditato | Allineato a `+Y` mondo (`ik_align_world_y = True`, `roll = 0.0`) in cima alla catena + Pole Target automatico (`ik_create_pole`) lungo il vettore di piega gomito/ginocchio |
+| **Vincolatura 1-click (`ctrl_def.bind_actd`)** | Singolo hop `DEF <- CTRL` | Catena di constraint multi-hop completa (`DEF <- ORG <- MCH <- CTRL`) con zero Dependency Cycle |
 
 ---
 
@@ -64,6 +75,7 @@ Genera in un click bone controller tracciati, colorati e dotati di **custom shap
 | `docs/images/01_before_def_bones.png` | Armatura con i bone `DEF_` selezionati e il pannello **DEF Ctrl** aperto nella Sidebar (`N`). |
 | `docs/images/02_after_ctrl_generated.png` | Dopo **Genera Controller** con preset *Arto Bipede (Cubo/Rosso/Mirror)*: controller colorati in Pose Mode. |
 | `docs/images/demo.gif` | Demo animata: onda di rotazione sulla catena di controller generati. |
+| `docs/images/03_ik_world_y_and_pole.png` | Catena IK con target allineato a `+Y` mondo e pole target automatico (`ctrl_def.add_ik`). |
 
 ![Armatura con bone DEF selezionati e pannello DEF Ctrl](docs/images/01_before_def_bones.png)
 
@@ -76,6 +88,10 @@ Genera in un click bone controller tracciati, colorati e dotati di **custom shap
 ![Demo animata: rotazione della catena di controller](docs/images/demo.gif)
 
 *Figura 3 — Demo animata: onda di rotazione sulla catena di controller generati.*
+
+![Target IK allineato a +Y mondo con pole automatico](docs/images/03_ik_world_y_and_pole.png)
+
+*Figura 4 — Catena IK da `ctrl_def.add_ik`: target allineato a `+Y` mondo (`roll = 0.0`) in cima alla catena e pole automatico lungo la direzione di piega.*
 
 ---
 
@@ -141,13 +157,14 @@ I runner stampano il verdetto della suite: `VERDETTO: OK passati=<n> falliti=0 t
 
 ## 📦 Creazione dello ZIP Installabile
 
-Il pacchetto installabile per `v0.2.0` è il **package modulare**: il monolite generato più la cartella dei moduli `ctrl_def_mods\`, senza cartella contenitrice:
+Il pacchetto installabile per `v0.3.0` è il **package modulare**: il monolite generato più la cartella dei moduli `ctrl_def_mods\`, senza cartella contenitrice:
 
 ```
-def_controller_auto_v0.2.0.zip
+def_controller_auto_v0.3.0.zip
 ├── __init__.py              (monolite generato)
 ├── blender_manifest.toml
 ├── README.md
+├── LICENSE
 └── ctrl_def_mods\
     ├── __init__.py
     ├── ctrl_def_generation.py
@@ -190,7 +207,7 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 
 ---
 
-## ⚠️ Limitazioni Note e Roadmap (post `v0.2.0`)
+## ⚠️ Limitazioni Note e Roadmap (post `v0.3.0`)
 
 - I workflow supportano le catene **FK**; l'IK è coperto dal target rapido su catene di 2‑3 controller (`ctrl_def.add_ik`), mentre lo **switch automatico IK/FK** è previsto per `v2`.
 - I widget si appoggiano all'estensione opzionale **Bone Widget** (il pannello offre il link diretto di installazione): nessuna libreria di widget integrata.
@@ -199,6 +216,12 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 ---
 
 ## 📋 Changelog
+
+### `v0.3.0` — Auto Rig Layers (DEF / MCH / ORG / CTRL)
+- **Pipeline di rigging multi-livello**: `DEF -> ORG -> MCH -> CTRL`, `DEF -> MCH -> CTRL`, `MCH -> ORG`, `ORG -> CTRL` e `Custom` (prima solo `DEF -> CTRL` diretta).
+- **Livelli intermedi automatici**: Bone Collection `MCH` e `ORG` create e nascoste automaticamente, con lock di Location/Rotation/Scale (`lock_mch_org`).
+- **Target IK a +Y mondo**: allineamento `ik_align_world_y = True` (`roll = 0.0`) in cima alla catena + pole target automatico (`ik_create_pole`) lungo il vettore di piega gomito/ginocchio.
+- **Vincolatura multi-hop**: `ctrl_def.bind_actd` costruisce l'intera catena `DEF <- ORG <- MCH <- CTRL` con zero Dependency Cycle.
 
 ### `v0.2.0`
 - **Package modulare**: la fonte di verità è il package `ctrl_def_mods\` (9 moduli) assemblato nel monolite installabile da `scripts/build_monolith.py`.

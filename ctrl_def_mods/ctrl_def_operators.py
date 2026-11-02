@@ -235,6 +235,10 @@ class CTRLDEF_OT_bind_actd(Operator):
 
     def _apply_actd(self, context, stg):
         """Integrazione diretta con ACTD: token sorgente CTRL, destinazione DEF."""
+        # Le pipeline multi-hop (DEF <- MCH <- CTRL o DEF <- ORG <- MCH <- CTRL)
+        # le vincola il percorso nativo, che copre tutte le voci del registro.
+        if getattr(stg, "pipeline_mode", "DEF_CTRL") not in ("DEF_CTRL", "CUSTOM"):
+            return None
         if not (hasattr(bpy.ops, "actd") and hasattr(bpy.ops.actd, "apply_transforms")):
             return None
         actd = getattr(context.scene, "actd_settings", None)
@@ -395,8 +399,9 @@ def _addon_version():
 # Proprieta' di CTRLDEF_PG_settings serializzate nel preset utente.
 # La vecchia chiave "shape_rot" dei preset salvati con versioni precedenti non
 # e' piu' letta: viene ignorata come qualsiasi chiave sconosciuta (fallback legacy).
-_SETTINGS_KEYS = ("prefix_def", "prefix_ctrl", "widget_name", "scale",
-                  "parent", "mirror")
+_SETTINGS_KEYS = ("pipeline_mode", "prefix_def", "prefix_ctrl", "widget_name",
+                  "scale", "parent", "mirror", "lock_mch_org",
+                  "ik_align_world_y", "ik_create_pole")
 
 
 def _settings_values(stg):
@@ -622,11 +627,14 @@ def _selected_ctrl_chains(arm):
             if not any(len(o) > len(c) and o[:len(c)] == c for o in catene)]
 
 
-def _add_ik_target_chain(arm, bcoll_name, chain, pole=False):
+def _add_ik_target_chain(arm, bcoll_name, chain, pole=False, align_world_y=True):
     """Crea il target IK della catena e il vincolo IK sul primo controller.
 
-    Il target e' un bone non-deform libero, col roll dell'ultimo controller,
-    assegnato alla bone collection indicata; il constraint vive sul primo
+    Il target e' un bone non-deform libero assegnato alla bone collection
+    indicata. Con align_world_y vive sulla punta finale della catena (la head
+    del subtarget e' il punto mirato dal constraint IK) ed e' orientato lungo
+    +Y globale, roll compreso; altrimenti conserva il comportamento legacy
+    (head, tail e roll dell'ultimo controller). Il constraint vive sul primo
     controller e chiude il loop su chain_count anelli. Restituisce il numero
     di target creati.
     """
@@ -643,6 +651,32 @@ def _add_ik_target_chain(arm, bcoll_name, chain, pole=False):
     bcoll = arm.data.collections.get(bcoll_name)
     if bcoll is None:
         bcoll = arm.data.collections.new(bcoll_name)
+    # Stessa guardia zero-length dei controller generati
+    lung = (ultimo.tail - ultimo.head).length
+    if lung <= 1e-6:
+        lung = 0.15
+    # Snodo della catena: base del pole target e punto di piega
+    primo = ebones.get(chain[0])
+    medio = ebones.get(chain[1]) if len(chain) >= 2 else None
+    mid_pos = medio.head.copy() if medio is not None else ultimo.head.copy()
+    bend_dir = Vector((0.0, -1.0, 0.0))
+    if primo is not None:
+        asse = ultimo.tail - primo.head
+        if asse.length > 1e-6:
+            proiezione = primo.head + asse * (
+                (mid_pos - primo.head).dot(asse) / asse.length_squared)
+            piega = mid_pos - proiezione
+            if piega.length >= 1e-4:
+                bend_dir = piega.normalized()
+    if align_world_y:
+        # Il constraint IK mira la head del subtarget: il target nasce sulla
+        # punta finale della catena e si estende lungo +Y globale
+        if (ultimo.tail - ultimo.head).length > 1e-6:
+            base_head = ultimo.tail.copy()
+        else:
+            base_head = ultimo.head.copy()
+    else:
+        base_head = ultimo.head.copy()
     nomi = ["IK_" + chain[-1]]
     if pole:
         nomi.append("IK_" + chain[-1] + "_pole")
@@ -651,13 +685,21 @@ def _add_ik_target_chain(arm, bcoll_name, chain, pole=False):
         ebone = ebones.get(nome)
         if ebone is None:
             ebone = ebones.new(nome)
-        ebone.head = ultimo.head.copy()
-        # Stessa guardia zero-length dei controller generati
-        if (ultimo.tail - ultimo.head).length > 1e-6:
-            ebone.tail = ultimo.tail.copy()
+        if nome.endswith("_pole"):
+            ebone.head = mid_pos + bend_dir * max(lung * 1.5, 0.25)
+            ebone.tail = ebone.head + Vector((0.0, max(lung * 0.5, 0.1), 0.0))
+            ebone.roll = 0.0
+        elif align_world_y:
+            ebone.head = base_head
+            ebone.tail = ebone.head + Vector((0.0, max(lung, 0.1), 0.0))
+            ebone.roll = 0.0
         else:
-            ebone.tail = ultimo.head + Vector((0.0, 0.1, 0.0))
-        ebone.roll = ultimo.roll
+            ebone.head = ultimo.head.copy()
+            if (ultimo.tail - ultimo.head).length > 1e-6:
+                ebone.tail = ultimo.tail.copy()
+            else:
+                ebone.tail = ultimo.head + Vector((0.0, 0.1, 0.0))
+            ebone.roll = ultimo.roll
         ebone.use_deform = False
         ebone.parent = None
         bcoll.assign(ebone)
@@ -706,9 +748,13 @@ class CTRLDEF_OT_add_ik(Operator):
             _ensure_armature_mode(context, arm, 'OBJECT')
             self.report({'ERROR'}, tr("msg.no_ik_chain"))
             return {'CANCELLED'}
+        stg = getattr(context.scene, "ctrl_def_settings", None)
+        pole = bool(getattr(stg, "ik_create_pole", False))
+        align_world_y = bool(getattr(stg, "ik_align_world_y", True))
         creati = 0
         for catena in catene:
-            creati += _add_ik_target_chain(arm, "CTRLS", catena)
+            creati += _add_ik_target_chain(arm, "CTRLS", catena, pole=pole,
+                                           align_world_y=align_world_y)
         _ensure_armature_mode(context, arm, 'OBJECT')
         self.report({'INFO'}, tr("msg.ik_created") + ": " + str(creati))
         return {'FINISHED'}

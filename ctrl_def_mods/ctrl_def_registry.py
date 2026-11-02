@@ -37,9 +37,13 @@ def _write_registry(obj, data):
     return True
 
 
-def _mark_generated(obj, ctrl_name, def_bone):
+def _mark_generated(obj, ctrl_name, def_bone, role=None):
+    # role e' opzionale: le chiamate storiche a 3 argomenti restano identiche
     data = _read_registry(obj)
-    data[ctrl_name] = {"def": def_bone}
+    entry = {"def": def_bone}
+    if role:
+        entry["role"] = role
+    data[ctrl_name] = entry
     _write_registry(obj, data)
 
 

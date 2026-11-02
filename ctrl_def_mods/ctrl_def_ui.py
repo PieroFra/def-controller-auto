@@ -48,10 +48,17 @@ def _draw_preset_box(layout, stg):
     row.operator("ctrl_def.apply_preset", text="", icon='CHECKMARK')
 
 
+# Modalita' di pipeline che prevedono bone MCH/ORG da bloccare.
+_LOCK_MODES = ("DEF_MCH_CTRL", "DEF_ORG_MCH_CTRL", "MCH_ORG", "ORG_CTRL")
+
+
 def _draw_settings(layout, stg):
-    """Setup: prefissi dei bone e specchiatura L/R."""
+    """Setup: pipeline, prefissi dei bone e specchiatura L/R."""
+    layout.prop(stg, "pipeline_mode", text=tr("panel.pipeline"))
     layout.prop(stg, "prefix_def", text=tr("panel.prefix_def"))
     layout.prop(stg, "prefix_ctrl", text=tr("panel.prefix_ctrl"))
+    if getattr(stg, "pipeline_mode", "DEF_CTRL") in _LOCK_MODES:
+        layout.prop(stg, "lock_mch_org", text=tr("panel.lock_mch_org"))
     layout.prop(stg, "mirror", text=tr("panel.mirror"))
 
 
@@ -79,9 +86,14 @@ def _draw_controller_settings(layout, stg):
     layout.prop(stg, "parent", text=tr("panel.parent"))
 
 
-def _draw_ik_box(layout):
+def _draw_ik_box(layout, stg=None):
     """Target IK rapido sui controller selezionati (Fase E)."""
+    if stg is None:
+        stg = getattr(bpy.context.scene, "ctrl_def_settings", None)
     layout.label(text=tr("panel.ik"), icon='CONSTRAINT')
+    if stg is not None:
+        layout.prop(stg, "ik_align_world_y", text=tr("panel.ik_align_y"))
+        layout.prop(stg, "ik_create_pole", text=tr("panel.ik_pole"))
     layout.operator("ctrl_def.add_ik", text=tr("op.add_ik"), icon='CONSTRAINT')
 
 
@@ -143,7 +155,7 @@ class CTRLDEF_PT_panel(Panel):
         # 3 · Avanzate: IK, export/preset, diagnostica e pulizia (chiusa)
         corpo = _section(layout, "sec.advanced", chiusa=True)
         if corpo is not None:
-            _draw_ik_box(corpo)
+            _draw_ik_box(corpo, stg)
             _draw_export_box(corpo)
             _draw_advanced_actions(corpo)
         # Guida rapida in fondo (chiusa)

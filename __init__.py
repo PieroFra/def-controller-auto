@@ -1,11 +1,11 @@
 # CTRL_DEF — entry point installabile: bl_info e riesporta i simboli dei moduli.
 bl_info = {
-    "name": "DEF Controller Auto",
+    "name": "Auto Rig Layers (DEF / MCH / ORG / CTRL)",
     "author": "Pierfrancesco Diodato",
-    "version": (0, 2, 0),
+    "version": (0, 3, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > DEF Ctrl",
-    "description": "Genera controller per bone DEF, tracciati e rimovibili",
+    "description": "Multi-layer rig pipeline (DEF, ORG, MCH, CTRL), World +Y IK, and Bone Widget integration",
     "category": "Rigging",
 }
 
@@ -22,11 +22,11 @@ if __package__:
         _bonewidget_available, _bonewidget_create, _is_def_bone, _mirror_name,
         _side_of)
     from .ctrl_def_mods.ctrl_def_properties import (
-        _ITEMS_CACHE, CTRLDEF_PG_settings, _items_parent, _items_preset,
-        _on_preset_update)
+        _ITEMS_CACHE, CTRLDEF_PG_settings, _items_parent, _items_pipeline,
+        _items_preset, _on_pipeline_update, _on_preset_update)
     from .ctrl_def_mods.ctrl_def_generation import (
         CTRLDEF_OT_generate, _assign_ctrl_parents, _collect_def_bones,
-        _configure_ctrl_pose_bones, _create_ctrl_edit_bones)
+        _configure_ctrl_pose_bones, _create_ctrl_edit_bones, _pipeline_steps)
     from .ctrl_def_mods.ctrl_def_operators import (
         _PRESETS, CTRLDEF_OT_add_ik, CTRLDEF_OT_apply_preset,
         CTRLDEF_OT_bind_actd,
@@ -39,7 +39,8 @@ if __package__:
         _purge_unused_shapes, _remove_registered_bones, _selected_ctrl_chains)
     from .ctrl_def_mods.ctrl_def_ui import (
         CTRLDEF_PT_panel, _draw_actions, _draw_advanced_actions,
-        _draw_controller_settings, _draw_guide, _draw_preset_box,
+        _draw_controller_settings, _draw_export_box, _draw_guide,
+        _draw_ik_box, _draw_preset_box,
         _draw_settings, _draw_stats_box, _draw_widget_box, _section)
     from .ctrl_def_mods.ctrl_def_main import (
         _classes, _register_class_safe, _unregister_class_safe, register,

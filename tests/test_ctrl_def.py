@@ -137,17 +137,29 @@ def test_registration_elements():
     assert stg.prefix_ctrl == "", f"prefix_ctrl deve essere vuoto di default, trovato {stg.prefix_ctrl!r}"
     assert stg.parent == "CHAIN", f"parent di default deve essere CHAIN, trovato {stg.parent!r}"
     assert stg.prefix_def == "DEF_", f"prefix_def di default inatteso: {stg.prefix_def!r}"
-    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.2.0
+    # Pipeline e opzioni dei layer meccanici: default storici invariati
+    assert stg.pipeline_mode == "DEF_CTRL", \
+        f"pipeline_mode di default inatteso: {stg.pipeline_mode!r}"
+    assert stg.lock_mch_org is True, "lock_mch_org deve essere attivo di default"
+    assert stg.ik_align_world_y is True, "ik_align_world_y deve essere attivo di default"
+    assert stg.ik_create_pole is False, "ik_create_pole deve essere disattivo di default"
+    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.3.0
     mod = _addon_module()
     assert mod is not None, "Modulo dell'addon non trovato: impossibile leggere bl_info"
     bl_info = mod.bl_info
     assert bl_info["author"] == "Pierfrancesco Diodato", \
         f"bl_info['author'] inatteso: {bl_info['author']!r}"
-    assert tuple(bl_info["version"]) == (0, 2, 0), \
+    assert tuple(bl_info["version"]) == (0, 3, 0), \
         f"bl_info['version'] inattesa: {bl_info['version']!r}"
-    # Nome, categoria e bl_idname non devono cambiare
-    assert bl_info["name"] == "DEF Controller Auto", f"bl_info['name'] cambiato: {bl_info['name']!r}"
+    # Nome e categoria esposti, bl_idname non devono cambiare
+    assert bl_info["name"] == "Auto Rig Layers (DEF / MCH / ORG / CTRL)", \
+        f"bl_info['name'] inatteso: {bl_info['name']!r}"
     assert bl_info["category"] == "Rigging", f"bl_info['category'] cambiata: {bl_info['category']!r}"
+    # Le box della Sidebar (IK ed Export) devono restare presenti e chiamabili
+    assert callable(getattr(mod, "_draw_ik_box", None)), \
+        "Funzione _draw_ik_box mancante o non chiamabile nel modulo"
+    assert callable(getattr(mod, "_draw_export_box", None)), \
+        "Funzione _draw_export_box mancante o non chiamabile nel modulo"
     # Mirror: il separatore originale va preservato (_, .)
     assert mod._mirror_name("DEF_hand_L") == "DEF_hand_R", \
         f"Mirror di DEF_hand_L: {mod._mirror_name('DEF_hand_L')!r} invece di 'DEF_hand_R'"
@@ -206,6 +218,9 @@ def test_registration_elements():
         f"Prima voce di _items_parent: {mod._items_parent(None, None)[0][0]!r} invece di 'CHAIN'"
     assert mod._items_preset(None, None)[0][0] == "DEFAULT", \
         f"Prima voce di _items_preset: {mod._items_preset(None, None)[0][0]!r} invece di 'DEFAULT'"
+    # Come per parent e preset, la prima voce della pipeline e' il default storico
+    assert mod._items_pipeline(None, None)[0][0] == "DEF_CTRL", \
+        f"Prima voce di _items_pipeline: {mod._items_pipeline(None, None)[0][0]!r} invece di 'DEF_CTRL'"
     # Tooltip dinamici: IT ed EN devono avere esattamente le stesse chiavi,
     # altrimenti una delle due lingue mostra la chiave grezza nel mouseover.
     assert set(mod._I18N["it"].keys()) == set(mod._I18N["en"].keys()), \
@@ -217,7 +232,9 @@ def test_registration_elements():
     # Ogni proprieta' del pannello ha il proprio tooltip in entrambe le lingue
     for _chiave_prop in ("tip.prop.prefix_def", "tip.prop.prefix_ctrl",
                          "tip.prop.scale", "tip.prop.parent",
-                         "tip.prop.mirror", "tip.prop.preset"):
+                         "tip.prop.mirror", "tip.prop.preset",
+                         "tip.prop.pipeline", "tip.prop.lock_mch_org",
+                         "tip.prop.ik_align_y", "tip.prop.ik_pole"):
         for _lingua in ("it", "en"):
             _testo_prop = mod.tr(_chiave_prop, _lingua)
             assert _testo_prop and _testo_prop != _chiave_prop, \
@@ -297,7 +314,8 @@ def test_registration_elements():
         f"Voci di _items_preset inattese: {[v[0] for v in mod._items_preset(None, None)]}"
     # execute di generate scomposto in helper di modulo
     for nome_helper in ("_collect_def_bones", "_create_ctrl_edit_bones",
-                        "_assign_ctrl_parents", "_configure_ctrl_pose_bones"):
+                        "_assign_ctrl_parents", "_configure_ctrl_pose_bones",
+                        "_pipeline_steps"):
         assert callable(getattr(mod, nome_helper, None)), \
             f"Helper di generazione {nome_helper} mancante o non chiamabile nel modulo"
     # Delegati a Bone Widget, dispatcher rimosso: i widget esterni non hanno
@@ -356,6 +374,9 @@ def test_registration_elements():
     voci_preset_cache = mod._items_preset(None, None)
     assert voci_preset_cache in mod._ITEMS_CACHE, \
         "L'elenco restituito da _items_preset non e' trattenuto in _ITEMS_CACHE"
+    voci_pipe_cache = mod._items_pipeline(None, None)
+    assert voci_pipe_cache in mod._ITEMS_CACHE, \
+        "L'elenco restituito da _items_pipeline non e' trattenuto in _ITEMS_CACHE"
     # Architettura Moduli + Package: lo script di build e gli 8 moduli
     # funzionali devono esistere su disco accanto all'entry point __init__.py
     radice_addon = os.path.abspath(
@@ -699,8 +720,8 @@ def test_bind_actd_rotazione():
         mappa = json.load(file_json)
     assert mappa.get("armature") == arm_obj.name, \
         f"armature nel JSON: {mappa.get('armature')!r} invece di {arm_obj.name!r}"
-    assert mappa.get("version") == "0.2.0", \
-        f"version nel JSON: {mappa.get('version')!r} invece di '0.2.0'"
+    assert mappa.get("version") == "0.3.0", \
+        f"version nel JSON: {mappa.get('version')!r} invece di '0.3.0'"
     assert mappa["mapping"]["arm.L"]["def"] == "DEF_arm.L", \
         f"Mappatura arm.L errata nel JSON: {mappa['mapping'].get('arm.L')!r}"
     assert set(mappa["mapping"].keys()) == {"arm.L", "forearm.L", "hand.L"}, \
@@ -804,6 +825,11 @@ def test_bind_actd_rotazione():
     bone_ik = arm_data.bones.get("IK_hand.L")
     assert bone_ik is not None, "Target IK_hand.L non creato da add_ik"
     assert bone_ik.use_deform is False, "Il target IK non deve deformare la mesh"
+    # Fase H: con ik_align_world_y attivo (default) il target e' orientato
+    # esattamente lungo +Y globale, con roll zero e nessuna inclinazione.
+    dir_ik = (bone_ik.tail_local - bone_ik.head_local).normalized()
+    assert abs(dir_ik.x) < 1e-4 and abs(dir_ik.y - 1.0) < 1e-4 and abs(dir_ik.z) < 1e-4, \
+        f"Target IK_hand.L non allineato a +Y globale: {tuple(round(c, 6) for c in dir_ik)}"
     assert arm_data.bones.get("IK_hand.L_pole") is None, \
         "Target pole creato senza richiesta (pole=False)"
     con_ik = arm_obj.pose.bones["arm.L"].constraints.get("CTRL_DEF_IK")
@@ -869,6 +895,98 @@ def test_bind_actd_rotazione():
     assert mod._read_registry(arm_obj) == {}, \
         f"Registry non vuoto dopo remove(): {mod._read_registry(arm_obj)}"
     bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Fase I: pipeline multi-layer DEF -> ORG -> MCH -> CTRL end-to-end.
+    # Ogni step consuma i bone dello step precedente: i tre layer devono nascere
+    # con le rispettive Bone Collection, restare bloccati e trasmettere la
+    # rotazione del controller fino al DEF, senza anelli di dipendenza.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.pipeline_mode = "DEF_ORG_MCH_CTRL"
+    arm_obj, arm_data = _new_armature("RigMultiLayer")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res_multi = bpy.ops.ctrl_def.generate()
+    assert res_multi == {'FINISHED'}, f"Generazione multi-layer fallita: {res_multi}"
+    nomi_multi = ("arm.L", "forearm.L", "hand.L")
+    for base in nomi_multi:
+        for prefisso in ("ORG_", "MCH_", ""):
+            nome_layer = prefisso + base
+            assert nome_layer in arm_data.bones, \
+                f"Layer {nome_layer!r} non creato dalla pipeline DEF_ORG_MCH_CTRL"
+    coll_org = arm_data.collections.get("ORG")
+    coll_mch = arm_data.collections.get("MCH")
+    coll_ctrl = arm_data.collections.get("CTRLS")
+    assert coll_org is not None, "Bone Collection ORG mancante"
+    assert coll_mch is not None, "Bone Collection MCH mancante"
+    assert coll_ctrl is not None, "Bone Collection CTRLS mancante"
+    assert coll_org.is_visible is False, \
+        "La collection ORG deve restare nascosta con lock_mch_org attivo"
+    assert coll_mch.is_visible is False, \
+        "La collection MCH deve restare nascosta con lock_mch_org attivo"
+    ossa_org = {b.name for b in coll_org.bones}
+    ossa_mch = {b.name for b in coll_mch.bones}
+    ossa_ctrl = {b.name for b in coll_ctrl.bones}
+    for base in nomi_multi:
+        assert "ORG_" + base in ossa_org, \
+            f"ORG_{base} non iscritto nella collection ORG: {sorted(ossa_org)}"
+        assert "MCH_" + base in ossa_mch, \
+            f"MCH_{base} non iscritto nella collection MCH: {sorted(ossa_mch)}"
+        assert base in ossa_ctrl, \
+            f"{base} non iscritto nella collection CTRLS: {sorted(ossa_ctrl)}"
+        for prefisso in ("ORG_", "MCH_"):
+            pb_mecc = arm_obj.pose.bones.get(prefisso + base)
+            assert pb_mecc is not None, f"Pose bone {prefisso + base} mancante"
+            assert all(pb_mecc.lock_location) and all(pb_mecc.lock_rotation) \
+                and all(pb_mecc.lock_scale), \
+                f"{prefisso + base} non bloccato su location/rotation/scale"
+    # Il bind deve coprire ogni hop della catena, non solo l'ultimo
+    res_multi_bind = bpy.ops.ctrl_def.bind_actd()
+    assert res_multi_bind == {'FINISHED'}, f"bind_actd multi-layer fallito: {res_multi_bind}"
+    for sorgente, destinazione in (("MCH_arm.L", "arm.L"),
+                                   ("ORG_arm.L", "MCH_arm.L"),
+                                   ("DEF_arm.L", "ORG_arm.L")):
+        con_multi = arm_obj.pose.bones[sorgente].constraints.get("CTRL_DEF_COPY_TRANSFORMS")
+        assert con_multi is not None, f"Constraint COPY_TRANSFORMS mancante su {sorgente}"
+        assert con_multi.subtarget == destinazione, \
+            f"Constraint di {sorgente} punta a {con_multi.subtarget!r} invece di {destinazione!r}"
+    # Rotazione del controller finale: ogni hop deve trasmetterla al DEF
+    bpy.ops.object.mode_set(mode='POSE')
+    pb_ctrl_multi = arm_obj.pose.bones["arm.L"]
+    pb_ctrl_multi.rotation_mode = 'XYZ'
+    pb_ctrl_multi.rotation_euler = (0.0, 0.0, math.radians(25.0))
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    for nome_hop in ("MCH_arm.L", "ORG_arm.L", "DEF_arm.L"):
+        pb_hop = arm_eval.pose.bones[nome_hop]
+        rest_hop = arm_data.bones[nome_hop].matrix_local.to_3x3()
+        delta_hop = (pb_hop.matrix.to_3x3() @ rest_hop.inverted()).to_quaternion()
+        angolo_hop = math.degrees(delta_hop.angle)
+        assert abs(angolo_hop - 25.0) < 0.01, \
+            (f"{nome_hop} ruotato di {angolo_hop:.4f} gradi invece di 25 "
+             "lungo la catena multi-hop (Dependency Cycle?)")
+    diff_multi = arm_eval.pose.bones["DEF_arm.L"].matrix - arm_eval.pose.bones["arm.L"].matrix
+    err_multi = max(abs(diff_multi[r][c]) for r in range(4) for c in range(4))
+    assert err_multi < 1e-4, \
+        f"Catena DEF_ORG_MCH_CTRL non propagata (delta={err_multi}): Dependency Cycle?"
+    # remove(): i tre layer devono sparire, i DEF restano intatti
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res_multi_remove = bpy.ops.ctrl_def.remove()
+    assert res_multi_remove == {'FINISHED'}, \
+        f"remove() multi-layer fallito: {res_multi_remove}"
+    for base in nomi_multi:
+        for prefisso in ("ORG_", "MCH_", ""):
+            nome_layer = prefisso + base
+            assert arm_data.bones.get(nome_layer) is None, \
+                f"remove() ha lasciato il layer {nome_layer!r}"
+        assert arm_data.bones.get("DEF_" + base) is not None, \
+            f"remove() ha rimosso il bone DEF_{base}: i DEF devono restare intatti"
+    assert mod._read_registry(arm_obj) == {}, \
+        f"Registry non vuoto dopo remove() multi-layer: {mod._read_registry(arm_obj)}"
 
 
 def test_presets():

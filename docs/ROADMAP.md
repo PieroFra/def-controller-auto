@@ -25,7 +25,7 @@ Stato archiviato come REFERENZA: non è un gate aperto.
 
 ---
 
-## Fase B — Diagnostica Pre-Flight (`ctrl_def.diagnose`)
+## Fase B (COMPLETATA) — Diagnostica Pre-Flight (`ctrl_def.diagnose`)
 
 - **Moduli target:** `ctrl_def_generation.py` + `ctrl_def_operators.py`
   + `ctrl_def_ui.py` + `ctrl_def_i18n.py`.
@@ -98,8 +98,85 @@ dai test headless (commit `f5bfdb5`, Fase C+D).
   Target IK, Diagnostica, Export JSON/CSV e Preset Utente).
 - Chiusa la cartella locale `_esperimenti\` (già esclusa da `.gitignore`).
 
-Nota: la pubblicazione su GitHub e Blender Extensions resta in attesa della
-decisione dell'utente (nessun commit né push eseguiti).
+Nota: v0.2.0 è stata pubblicata su GitHub (commit `e64025f`) ed è approvata e
+live su Blender Extensions (`https://extensions.blender.org/add-ons/ctrl-def/`).
+
+---
+
+## Ciclo `v0.3.0` — Multi-Layer Rig Pipeline (DEF / MCH / ORG / CTRL), IK World +Y & Rebranding
+
+Estensione dell'addon a una vera pipeline di rig multi-layer, stile Rigify,
+mantenendo l'estensione già approvata su Blender Extensions. Approccio:
+**un modulo alla volta**, con `gate.ps1` a ogni fase.
+
+### Fase F — Rebranding Visuale (zero rottura compatibilità)
+- **Moduli target:** `bl_info` (monolite generato) + `blender_manifest.toml`
+  + titoli UI e docs.
+- **Cosa:**
+  - aggiornamento nome display (`bl_info["name"]`, `name` in
+    `blender_manifest.toml`, titoli dei pannelli e documentazione);
+  - INVARIATI `id = "ctrl_def"` su Blender Extensions e tutti i
+    `bl_idname = "ctrl_def.*"` (operatori, pannelli, proprietà, UIList):
+    nessuna perdita dell'estensione approvata né dei preset utente.
+- **Verifica:** `gate.ps1` (`build=IN_SYNC`) + controllo che nessun id
+  registrato sia cambiato.
+
+### Fase G — Modello Dati & Preset Pipeline Multi-Layer (`ctrl_def_properties.py` + `ctrl_def_i18n.py`)
+- **Cosa:**
+  - supporto per layer sorgente/destinazione flessibili: `DEF_`, `MCH_`,
+    `ORG_`, `CTRL_` o nome pulito (nessun prefisso);
+  - Bone Collection automatica dedicata al layer target
+    (`"CTRLS"`, `"MCH"`, `"ORG"`);
+  - preset rapidi di Pipeline:
+    - `DEF -> CTRL` diretto (comportamento attuale);
+    - `DEF -> MCH -> CTRL`;
+    - `DEF -> ORG -> MCH -> CTRL` (stile Rigify);
+    - `MCH -> ORG`;
+    - `ORG -> CTRL`;
+  - opzioni IK in `CTRLDEF_PG_settings`:
+    - `ik_align_world_y` (`BoolProperty`, default `True`): il bone `IK_*`
+      punta lungo `+Y` globale con `roll = 0.0` e lunghezza proporzionale
+      alla catena;
+    - `ik_create_pole` (`BoolProperty`, default `False`): creazione opzionale
+      `POLE_*` proiettato lungo il piano di piega del gomito/ginocchio;
+  - etichette IT/EN aggiornate (i18n dinamica esistente, `_items_*` incluse).
+- **Verifica:** test headless dedicati in `tests/test_ctrl_def.py` + `gate.ps1`.
+
+### Fase H — Generazione Multi-Layer & Catene Concatenabili (`ctrl_def_generation.py` + `ctrl_def_registry.py`)
+- **Cosa:**
+  - estensione di `_collect_def_bones` / `_create_ctrl_edit_bones` per
+    generare da qualsiasi layer sorgente (`prefix_def` = `DEF_`, `MCH_`,
+    `ORG_`) verso qualsiasi layer target (`prefix_ctrl` = `""`, `CTRL_`,
+    `MCH_`, `ORG_`);
+  - assegnazione della Bone Collection coerente al layer target;
+  - tracciamento delle coppie `source -> target` nel registro JSON
+    (`ctrl_def_registry.py`), con supporto per catene multi-step
+    `DEF -> MCH -> ORG -> CTRL` senza Dependency Cycle.
+- **Verifica:** test headless (coppie registrate, catene multi-step, assenza
+  di cicli) in `tests/test_ctrl_def.py` + `gate.ps1`.
+
+### Fase I — IK World-Aligned (`+Y` globale) + Binding Multi-Hop (`ctrl_def_operators.py`)
+- **Cosa:**
+  - raffinamento di `_add_ik_target_chain` (righe 625-683): `IK_<tip>` nasce
+    alla tail della catena ma con direzione `(0, +L, 0)` (asse `+Y` globale),
+    `roll = 0.0`, `use_deform = False`;
+  - supporto Pole Target (`POLE_<mid>`) posizionato davanti al
+    ginocchio/gomito, proiettato lungo il piano di piega;
+  - estensione di `ctrl_def.bind_actd` e `_apply_native_bindings` per
+    vincolare qualsiasi coppia registrata (`DEF <- MCH`, `MCH <- ORG`,
+    `ORG <- CTRL` o `DEF <- CTRL`).
+- **Verifica:** test headless (orientamento `+Y`, roll, pole, binding
+  multi-hop) in `tests/test_ctrl_def.py` + `gate.ps1`.
+
+### Fase J — UI Collapsible, Test Headless & Rilascio `v0.3.0` (`ctrl_def_ui.py` + `tests\test_ctrl_def.py`)
+- **Cosa:**
+  - aggiornamento pannello `1 · Setup`: selettore Pipeline / Layer
+    `DEF/MCH/ORG/CTRL`;
+  - aggiornamento pannello `3 · Advanced`: opzioni IK `+Y World` e
+    `Pole Target`;
+  - test headless e probe UI (atteso `flagged=0`, nessun troncamento);
+  - bump a **0.3.0**, package ZIP in `dist\` e rilascio `v0.3.0`.
+- **Verifica:** `gate.ps1` completo + `run_ui_probe.ps1` + release ZIP/SHA256.
 
 ---
 

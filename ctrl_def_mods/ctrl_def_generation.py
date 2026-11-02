@@ -12,6 +12,35 @@ from .ctrl_def_shapes import _is_def_bone, _mirror_name
 # ===========================================================================
 # Helper della generazione controller (usati da CTRLDEF_OT_generate)
 # ===========================================================================
+def _pipeline_steps(stg):
+    """Restituisce gli step della pipeline come (src_prefix, dst_prefix, role, bcoll_name).
+
+    "DEF_CTRL" e "CUSTOM" restano il caso storico a un solo step, con ruolo e
+    bone collection dedotti dal prefisso controller scelto dall'utente.
+    """
+    mode = getattr(stg, "pipeline_mode", "DEF_CTRL")
+    ctrl_prefix = stg.prefix_ctrl or ""
+    if mode == "DEF_MCH_CTRL":
+        return [("DEF_", "MCH_", "MCH", "MCH"),
+                ("MCH_", ctrl_prefix, "CTRL", "CTRLS")]
+    if mode == "DEF_ORG_MCH_CTRL":
+        return [("DEF_", "ORG_", "ORG", "ORG"),
+                ("ORG_", "MCH_", "MCH", "MCH"),
+                ("MCH_", ctrl_prefix, "CTRL", "CTRLS")]
+    if mode == "MCH_ORG":
+        return [("MCH_", "ORG_", "ORG", "ORG")]
+    if mode == "ORG_CTRL":
+        return [("ORG_", ctrl_prefix, "CTRL", "CTRLS")]
+    # Default ("DEF_CTRL" o "CUSTOM"): il ruolo segue il prefisso controller
+    if ctrl_prefix.startswith("MCH"):
+        role, bcoll_name = "MCH", "MCH"
+    elif ctrl_prefix.startswith("ORG"):
+        role, bcoll_name = "ORG", "ORG"
+    else:
+        role, bcoll_name = "CTRL", "CTRLS"
+    return [(stg.prefix_def, ctrl_prefix, role, bcoll_name)]
+
+
 def _collect_def_bones(ebones, stg):
     """Raccoglie i bone DEF selezionati in Edit Mode.
 
@@ -36,24 +65,30 @@ def _collect_def_bones(ebones, stg):
     return da_fare
 
 
-def _create_ctrl_edit_bones(ebones, da_fare, stg):
-    """Crea o aggiorna gli EditBone dei controller ricalcando i bone DEF.
+def _create_ctrl_edit_bones(ebones, da_fare, stg, src_prefix=None, dst_prefix=None, role="CTRL"):
+    """Crea o aggiorna gli EditBone dei controller ricalcando i bone sorgente.
 
     Il controller e' un bone dell'armatura, non un oggetto: ne copia head,
     tail e roll, con guardia sul bone di lunghezza zero, e ha sempre
-    use_deform = False.
+    use_deform = False. src_prefix / dst_prefix servono agli step della
+    pipeline multi-livello; se assenti valgono i prefissi di stg.
     Restituisce (created, def_to_ctrl_name): la lista delle coppie
-    (nome controller, nome DEF) e la mappa DEF -> controller.
+    (nome controller, nome sorgente) e la mappa sorgente -> controller.
     """
     created = []
     # Mappa DEF -> nome controller, serve per ricostruire la catena FK
     def_to_ctrl_name = {}
+    src_p = stg.prefix_def if src_prefix is None else src_prefix
+    dst_p = (stg.prefix_ctrl or "") if dst_prefix is None else dst_prefix
     for b in da_fare:
-        base_name = b.name[len(stg.prefix_def):] if b.name.startswith(stg.prefix_def) else b.name
-        name = (stg.prefix_ctrl or "") + base_name
-        # Caso limite: senza prefisso DEF il nome coinciderebbe con quello del DEF
+        base_name = b.name[len(src_p):] if (src_p and b.name.startswith(src_p)) else b.name
+        name = dst_p + base_name
+        # Caso limite: senza prefisso il nome coinciderebbe con quello sorgente
         if name == b.name:
-            name = "CTRL_" + base_name
+            if role in ("MCH", "ORG"):
+                name = (role + "_") + base_name
+            else:
+                name = "CTRL_" + base_name
         ebone = ebones.get(name)
         if ebone is None:
             ebone = ebones.new(name)
@@ -113,27 +148,41 @@ def _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg):
         eb.select_tail = True
 
 
-def _configure_ctrl_pose_bones(arm, created, stg):
+def _configure_ctrl_pose_bones(arm, created, stg, role="CTRL", bcoll_name="CTRLS"):
     """In Object Mode assegna la bone collection e iscrive i pose bone.
 
-    Assicura la Bone Collection "CTRLS" e iscrive ogni coppia nel registro
-    JSON con _mark_generated. Colore e custom shape non sono piu' gestiti qui:
-    colore e widget li governa l'estensione opzionale Bone Widget. Restituisce
-    il numero di controller configurati.
+    Assicura la Bone Collection richiesta ("CTRLS", "MCH", "ORG") e iscrive
+    ogni coppia nel registro JSON con _mark_generated, indicando il ruolo per
+    i bone meccanici/originali. Con lock_mch_org attivo i bone MCH/ORG non
+    vengono ne' mostrati ne' mossi, cosi' non sporcano i keyframe.
+    Colore e custom shape non sono piu' gestiti qui: li governa l'estensione
+    opzionale Bone Widget. Restituisce il numero di controller configurati.
     """
-    # Tutti i controller generati finiscono nella bone collection "CTRLS"
-    bcoll = arm.data.collections.get("CTRLS")
+    bcoll = arm.data.collections.get(bcoll_name)
     if bcoll is None:
-        bcoll = arm.data.collections.new("CTRLS")
+        bcoll = arm.data.collections.new(bcoll_name)
+    meccanico = role in ("MCH", "ORG")
+    bloccato = meccanico and getattr(stg, "lock_mch_org", True)
     for name, def_name in created:
         bone = arm.data.bones.get(name)
         pbone = arm.pose.bones.get(name)
         if pbone is None:
             continue
-        # Iscrizione alla bone collection "CTRLS"
+        # Iscrizione alla bone collection dello step corrente
         if bone is not None and bcoll.name not in (c.name for c in bone.collections):
             bcoll.assign(bone)
-        _mark_generated(arm, name, def_name)
+        if bloccato:
+            pbone.lock_location = (True, True, True)
+            pbone.lock_rotation = (True, True, True)
+            pbone.lock_rotation_w = True
+            pbone.lock_scale = (True, True, True)
+        if meccanico:
+            _mark_generated(arm, name, def_name, role=role)
+        else:
+            _mark_generated(arm, name, def_name)
+    # La collection meccanica resta nascosta: si animano solo i CTRL
+    if bloccato and hasattr(bcoll, "is_visible"):
+        bcoll.is_visible = False
     return len(created)
 
 
@@ -165,10 +214,31 @@ class CTRLDEF_OT_generate(Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
             self.report({'ERROR'}, tr("msg.no_def_bones"))
             return {'CANCELLED'}
-        created, def_to_ctrl_name = _create_ctrl_edit_bones(ebones, da_fare, stg)
-        _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg)
+        # Pipeline a uno o piu' step: ogni step consuma i bone dello step precedente
+        steps = _pipeline_steps(stg)
+        correnti = da_fare
+        configurati = []
+        for src_p, dst_p, role, bcoll_name in steps:
+            created_step, mappa_step = _create_ctrl_edit_bones(
+                ebones, correnti, stg,
+                src_prefix=src_p, dst_prefix=dst_p, role=role)
+            _assign_ctrl_parents(ebones, correnti, mappa_step, stg)
+            configurati.append((created_step, role, bcoll_name))
+            correnti = [ebones[nm] for nm, _ in created_step if nm in ebones]
+        # La selezione torna sui bone DEF di partenza, non sugli ultimi creati
+        for b in da_fare:
+            eb = ebones.get(b.name)
+            if eb is None:
+                continue
+            eb.select = True
+            eb.select_head = True
+            eb.select_tail = True
         bpy.ops.object.mode_set(mode='OBJECT')
-        n_ctrl = _configure_ctrl_pose_bones(arm, created, stg)
+        # n_ctrl resta il conteggio dell'ultimo step, cioe' i veri controller
+        n_ctrl = 0
+        for created_step, role, bcoll_name in configurati:
+            n_ctrl = _configure_ctrl_pose_bones(
+                arm, created_step, stg, role=role, bcoll_name=bcoll_name)
         # I widget non nascono con i controller: li crea l'utente a parte con
         # ctrl_def.create_widget, quando Bone Widget e' disponibile.
         # Il widget si assegna in Pose Mode: si torna in Object Mode
