@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "ctrl_def"
 version = "0.3.0"
 name = "Auto Rig Layers (DEF / MCH / ORG / CTRL)"
-tagline = "Multi-layer rig pipeline (DEF / MCH / ORG / CTRL) and World +Y IK"
+tagline = "Multi-layer rig pipeline (DEF/MCH/ORG/CTRL) and World +Y IK"
 maintainer = "Pierfrancesco Diodato"
 type = "add-on"
 
