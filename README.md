@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
+[![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
 Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.3.0`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
 

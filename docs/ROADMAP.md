@@ -1,16 +1,16 @@
 # ROADMAP — CTRL_DEF (Controller Automatici da DEF)
 
 Piano di sviluppo a fasi verso **v0.2.0**. Approccio: **un modulo alla volta**,
-con verifica `gate.ps1` (verdetto `VERIFY_OK | ...` / `VERIFY_FAIL | ...`) a ogni fase.
+con verifica completa (build, sintassi e suite headless) a ogni fase.
 Il monolite `__init__.py` si rigenera con la build; non si modifica mai a mano.
 
 ## Stato corrente
 - Versione: **0.2.0** (bl_info e `blender_manifest.toml`, categoria Rigging).
 - Architettura attiva: "Moduli + Build Step" — fonte di verità in
   `ctrl_def_mods\*.py`, build deterministico `scripts\build_monolith.py`
-  (`build=IN_SYNC` nel gate).
-- Suite headless: verifica completa tramite `.opencode\scripts\gate.ps1`
-  (config: `.opencode\verify.config.psd1`).
+  (`build=IN_SYNC` nella verifica).
+- Suite headless: verifica completa (build, sintassi e suite Blender
+  headless) con controllo dei conteggi attesi.
 
 ---
 
@@ -107,7 +107,7 @@ live su Blender Extensions (`https://extensions.blender.org/add-ons/ctrl-def/`).
 
 Estensione dell'addon a una vera pipeline di rig multi-layer, stile Rigify,
 mantenendo l'estensione già approvata su Blender Extensions. Approccio:
-**un modulo alla volta**, con `gate.ps1` a ogni fase.
+**un modulo alla volta**, con verifica completa a ogni fase.
 
 ### Fase F — Rebranding Visuale (zero rottura compatibilità)
 - **Moduli target:** `bl_info` (monolite generato) + `blender_manifest.toml`
@@ -118,7 +118,7 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
   - INVARIATI `id = "ctrl_def"` su Blender Extensions e tutti i
     `bl_idname = "ctrl_def.*"` (operatori, pannelli, proprietà, UIList):
     nessuna perdita dell'estensione approvata né dei preset utente.
-- **Verifica:** `gate.ps1` (`build=IN_SYNC`) + controllo che nessun id
+- **Verifica:** build `IN_SYNC` + controllo che nessun id
   registrato sia cambiato.
 
 ### Fase G — Modello Dati & Preset Pipeline Multi-Layer (`ctrl_def_properties.py` + `ctrl_def_i18n.py`)
@@ -140,7 +140,7 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
     - `ik_create_pole` (`BoolProperty`, default `False`): creazione opzionale
       `POLE_*` proiettato lungo il piano di piega del gomito/ginocchio;
   - etichette IT/EN aggiornate (i18n dinamica esistente, `_items_*` incluse).
-- **Verifica:** test headless dedicati in `tests/test_ctrl_def.py` + `gate.ps1`.
+- **Verifica:** test headless dedicati in `tests/test_ctrl_def.py` + verifica completa.
 
 ### Fase H — Generazione Multi-Layer & Catene Concatenabili (`ctrl_def_generation.py` + `ctrl_def_registry.py`)
 - **Cosa:**
@@ -153,7 +153,7 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
     (`ctrl_def_registry.py`), con supporto per catene multi-step
     `DEF -> MCH -> ORG -> CTRL` senza Dependency Cycle.
 - **Verifica:** test headless (coppie registrate, catene multi-step, assenza
-  di cicli) in `tests/test_ctrl_def.py` + `gate.ps1`.
+  di cicli) in `tests/test_ctrl_def.py` + verifica completa.
 
 ### Fase I — IK World-Aligned (`+Y` globale) + Binding Multi-Hop (`ctrl_def_operators.py`)
 - **Cosa:**
@@ -166,7 +166,7 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
     vincolare qualsiasi coppia registrata (`DEF <- MCH`, `MCH <- ORG`,
     `ORG <- CTRL` o `DEF <- CTRL`).
 - **Verifica:** test headless (orientamento `+Y`, roll, pole, binding
-  multi-hop) in `tests/test_ctrl_def.py` + `gate.ps1`.
+  multi-hop) in `tests/test_ctrl_def.py` + verifica completa.
 
 ### Fase J — UI Collapsible, Test Headless & Rilascio `v0.3.0` (`ctrl_def_ui.py` + `tests\test_ctrl_def.py`)
 - **Cosa:**
@@ -176,15 +176,15 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
     `Pole Target`;
   - test headless e probe UI (atteso `flagged=0`, nessun troncamento);
   - bump a **0.3.0**, package ZIP in `dist\` e rilascio `v0.3.0`.
-- **Verifica:** `gate.ps1` completo + `run_ui_probe.ps1` + release ZIP/SHA256.
+- **Verifica:** verifica completa + probe UI deterministico + release ZIP/SHA256.
 
 ---
 
 ## Regole trasversali (valide per ogni fase)
-- Un modulo alla volta: un intervento per modulo, poi build + `gate.ps1`.
+- Un modulo alla volta: un intervento per modulo, poi build + verifica completa.
 - Non rinominare `bl_info` name, categoria Rigging, né id `ctrl_def.*`.
 - Fallback espliciti tra 4.2 LTS e 5.x, nessun controllo di versione sparso.
-- I test headless li scrive il **Coder**; Repo-Ops non certifica gate, riporta
-  solo la riga di verdetto.
-- Gate interattivi e prove esplorative restano in sessioni dedicate
-  (skill `addon-gui-gate`, `_esperimenti\`).
+- I test headless fanno parte della verifica documentata; ogni fase si chiude
+  con i conteggi attesi e zero fallimenti.
+- Le verifiche interattive e le prove esplorative restano prove manuali
+  separate: aggiornano la documentazione, non sostituiscono i test headless.
