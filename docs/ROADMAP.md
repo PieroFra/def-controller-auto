@@ -96,7 +96,7 @@ dai test headless (commit `f5bfdb5`, Fase C+D).
 - README EN/IT aggiornati all'architettura `v0.2.0` (package modulare,
   Bone Collection `"CTRLS"`, 3 sezioni collassabili + Guida, Bone Widget,
   Target IK, Diagnostica, Export JSON/CSV e Preset Utente).
-- Chiusa la cartella locale `_esperimenti\` (già esclusa da `.gitignore`).
+- Chiusa la cartella locale degli script di test (già esclusa da `.gitignore`).
 
 Nota: v0.2.0 è stata pubblicata su GitHub (commit `e64025f`) ed è approvata e
 live su Blender Extensions (`https://extensions.blender.org/add-ons/ctrl-def/`).

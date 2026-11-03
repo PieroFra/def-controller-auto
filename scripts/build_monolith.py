@@ -9,7 +9,7 @@ La fonte di verita' sono i moduli in ctrl_def_mods/*.py; __init__.py e' l'entry
 point installabile che li importa. La build non concatena piu' nulla: controlla
 versione, presenza dei moduli e compilazione del package.
 
-Semantica dell'exit code (letta da .opencode/scripts/verify.ps1):
+Semantica dell'exit code (letta dal gate del progetto):
     0 -> package allineato e compilabile (IN_SYNC)
     2 -> errore di verifica (versione incoerente, modulo mancante, sintassi)
 """
