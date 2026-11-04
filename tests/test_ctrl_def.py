@@ -816,7 +816,8 @@ def test_bind_actd_rotazione():
     # Stessa sorgente di lettura dell'operatore: pose bone selezionati.
     for nm in ("arm.L", "forearm.L", "hand.L"):
         pbone = arm_obj.pose.bones[nm]
-        assert pbone.select is True, f"Pose bone {nm} non selezionato dopo _seleziona_posa"
+        sel = pbone.select if hasattr(pbone, "select") else getattr(pbone.bone, "select", False)
+        assert sel is True, f"Pose bone {nm} non selezionato dopo _seleziona_posa"
     catene_lette = mod._selected_ctrl_chains(arm_obj)
     assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
         f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
