@@ -90,6 +90,8 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 
 *Figure 3 — Animated demo: rotation wave along the generated controller chain.*
 
+**[Watch the 1080p 60fps MP4 showcase](https://raw.githubusercontent.com/PieroFra/def-controller-auto/main/docs/media/ctrl_def_demo_v0.3.0.mp4)** (v0.3.0)
+
 ![IK target aligned to World +Y with automatic pole](docs/images/03_ik_world_y_and_pole.png)
 
 *Figure 4 — IK chain from `ctrl_def.add_ik`: target aligned to World `+Y` (`roll = 0.0`) at the chain tip and automatic pole along the bend direction.*
