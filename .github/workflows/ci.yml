@@ -103,13 +103,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path 'ci-logs' | Out-Null
           $log = "ci-logs/blender-${{ matrix.blender }}-${{ runner.os }}-tests.log"
           Write-Host "::group::scripts/run_tests.ps1 on Blender ${{ matrix.blender }}"
-          $lines = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -BlenderExe $env:BLENDER_BIN 2>&1 |
+          $lines = & pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -BlenderExe $env:BLENDER_BIN 2>&1 |
             ForEach-Object { $_.ToString() }
           $lines | Set-Content -LiteralPath $log -Encoding utf8
           $lines | ForEach-Object { Write-Host $_ }
           Write-Host '::endgroup::'
 
           $result = $lines | Where-Object { $_ -match '^VERDETTO: ' } | Select-Object -Last 1
+          $failures = $lines | Where-Object { $_ -match '^FAIL ' }
+          if ($failures) {
+            Write-Host "::group::Failed tests"
+            $failures | ForEach-Object { Write-Host $_ }
+            Write-Host '::endgroup::'
+          }
           if (-not $result) {
             Write-Host '::error::VERDETTO line missing: the test suite did not complete.'
             exit 1
