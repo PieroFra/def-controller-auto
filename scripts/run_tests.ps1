@@ -42,6 +42,14 @@ $blenderArgs = @(
 $output = & $BlenderExe @blenderArgs 2>&1 | Tee-Object -FilePath $LogFile
 $blenderCode = $LASTEXITCODE
 
+# Riverbera su stdout le righe di esito dei test (PASS/FAIL) per il CI
+foreach ($line in $output) {
+    $s = "$line"
+    if ($s -match '^(PASS|FAIL) ') {
+        Write-Host $s
+    }
+}
+
 # Decodifica la riga RISULTATO stampata dal bootstrap Python
 $passati = 0; $falliti = -1; $totale = 0; $trovato = $false
 foreach ($line in $output) {
