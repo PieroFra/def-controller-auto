@@ -10,7 +10,8 @@ param(
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Bootstrap = Join-Path $PSScriptRoot "run_ctrl_def_tests.py"
-$LogFile = Join-Path $env:TEMP "ctrl_def_run_tests.log"
+$TempRoot = [System.IO.Path]::GetTempPath()
+$LogFile = Join-Path $TempRoot "ctrl_def_run_tests.log"
 
 # Blender: percorso di default; se assente, cerca "blender" nel PATH
 if (-not (Test-Path -LiteralPath $BlenderExe)) {
