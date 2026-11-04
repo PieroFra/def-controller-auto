@@ -1,0 +1,130 @@
+name: CI
+
+# CI headless per CTRL_DEF (repo: def_controller_auto).
+#
+# I job di test scaricano i build ufficiali di Blender (linee LTS 4.2 e 5.2)
+# e lanciano la suite tramite scripts/run_tests.ps1 in headless. Il verdetto
+# viene letto dalla riga "VERDETTO: OK/FAIL ..." nel log.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  blender-tests:
+    name: Blender ${{ matrix.blender }} | ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        blender: ["4.2.23", "5.2.3"]
+    defaults:
+      run:
+        # scripts/run_tests.ps1 deriva la radice del repo da $PSScriptRoot,
+        # quindi il repository viene checked out come ctrl_def/ a prescindere
+        # dal nome del repo remoto.
+        working-directory: ctrl_def
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: ctrl_def
+
+      - name: Install Blender runtime libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 \
+            libxkbcommon0 libgl1 libsm6 libxrandr2 libegl1 libgomp1
+
+      - name: Restore Blender archive cache
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/blender/${{ matrix.blender }}
+          key: blender-${{ matrix.blender }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Download Blender ${{ matrix.blender }}
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '${{ matrix.blender }}'
+          $series = (($version -split '\.')[0, 1] -join '.')
+          $platform = if ($IsWindows) { 'windows-x64' } else { 'linux-x64' }
+          $extension = if ($IsWindows) { 'zip' } else { 'tar.xz' }
+          $archive = "blender-$version-$platform.$extension"
+          $url = "https://download.blender.org/release/Blender$series/$archive"
+          $dest = Join-Path $env:RUNNER_TEMP "blender/$version"
+          $downloads = Join-Path $env:RUNNER_TEMP 'blender/_downloads'
+          New-Item -ItemType Directory -Force -Path $dest, $downloads | Out-Null
+          Write-Host "Download $url"
+          $file = Join-Path $downloads $archive
+          Invoke-WebRequest -Uri $url -OutFile $file
+          tar -xf $file -C $dest
+          if ($LASTEXITCODE -ne 0) { throw "Extraction failed: $archive" }
+          Remove-Item -LiteralPath $file -Force
+
+      - name: Locate Blender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "blender/${{ matrix.blender }}"
+          $exe = Get-ChildItem -LiteralPath $root -Recurse -File |
+            Where-Object { $_.Name -in @('blender.exe', 'blender') } |
+            Select-Object -First 1
+          if (-not $exe) { throw "Blender binary not found under $root" }
+          & $exe.FullName --version 2>&1 | Select-Object -First 2 | ForEach-Object { Write-Host $_ }
+          Write-Host "BLENDER_BIN=$($exe.FullName)"
+          "BLENDER_BIN=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run headless test suite
+        shell: pwsh
+        run: |
+          # Blender scrive su stderr anche in caso di successo: non trasformare
+          # quello in errore terminante. run_tests.ps1 stampa "VERDETTO: ..."
+          # e l'exit code riflette l'esito, ma il verdetto viene comunque
+          # validato dal log per robustezza.
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path 'ci-logs' | Out-Null
+          $log = "ci-logs/blender-${{ matrix.blender }}-${{ runner.os }}-tests.log"
+          Write-Host "::group::scripts/run_tests.ps1 on Blender ${{ matrix.blender }}"
+          $lines = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -BlenderExe $env:BLENDER_BIN 2>&1 |
+            ForEach-Object { $_.ToString() }
+          $lines | Set-Content -LiteralPath $log -Encoding utf8
+          $lines | ForEach-Object { Write-Host $_ }
+          Write-Host '::endgroup::'
+
+          $result = $lines | Where-Object { $_ -match '^VERDETTO: ' } | Select-Object -Last 1
+          if (-not $result) {
+            Write-Host '::error::VERDETTO line missing: the test suite did not complete.'
+            exit 1
+          }
+          if ($result -notmatch '^VERDETTO: OK passati=\d+ falliti=0 totale=\d+$') {
+            Write-Host "::error::Failing suite: $result"
+            exit 1
+          }
+          Write-Host "SUITE scripts/run_tests.ps1 -> $result"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-blender-${{ matrix.blender }}-${{ runner.os }}
+          path: ctrl_def/ci-logs/
+          if-no-files-found: warn
+          retention-days: 14

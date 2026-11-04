@@ -270,3 +270,11 @@ CTRL_DEF is fully standalone (zero dependencies), but it unifies automatically i
 - **[A.C.T.D.](https://github.com/PieroFra/auto-copy-transforms-def) (Auto Copy Transforms DEF)** - reuses bones as non-destructive transform sources with auto-prefixed constraints.
 
 What rigging workflow is still slowing you down? Open an issue with the step you want automated next.
+
+## Known Limitations / Compatibility
+
+This addon supports Blender 4.2 LTS through 5.2+. Rapid IK/FK switching is deferred to v2. Binding with A.C.T.D. requires A.C.T.D. to be installed. Pre-flight diagnostics check for zero-length DEF bones, missing L/R mirrors, and non-DEF naming collisions.
+
+## Credits / Support / Report a bug
+
+Authored by Pierfrancesco Diodato. The project is licensed under GPL-3.0-or-later. For support, bug reports, or feature requests, please use the GitHub Issues tracker: https://github.com/PieroFra/def-controller-auto/issues. AI assistance is available for direction and revision, but final responsibility rests with the author. Always include minimal reproduction steps when opening an issue.
