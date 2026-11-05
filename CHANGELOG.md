@@ -3,6 +3,11 @@
 Tutte le modifiche notevoli di questo progetto verranno documentate in questo
 file. Il formato si basa su [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.2] - 2026-11-05
+
+### Fixed
+- Packaging: zip con `__init__.py` completo e package `ctrl_def_mods` incluso.
+
 ## [0.3.1] - 2026-11-05
 
 ### Fixed

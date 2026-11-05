@@ -4,19 +4,19 @@
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
-[![Version](https://img.shields.io/badge/version-0.3.1-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
+[![Version](https://img.shields.io/badge/version-0.3.2-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`) — **Auto Rig Layers** (`v0.3.1`): pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycle.
+Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`) — **Auto Rig Layers** (`v0.3.2`): pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycle.
 
 | | |
 |---|---|
 | **Compatibilità** | **Blender 4.2 LTS — 5.2+** |
 | **Categoria** | **Rigging** |
-| **Versione** | **0.3.1** |
+| **Versione** | **0.3.2** |
 | **Autore** | **Pierfrancesco Diodato** |
 | **Tipo** | Add-on (ZIP installabile o cartella) |
 | **Licenza** | GPL-3.0-or-later |
@@ -158,10 +158,10 @@ I runner stampano il verdetto della suite: `VERDETTO: OK passati=<n> falliti=0 t
 
 ## 📦 Creazione dello ZIP Installabile
 
-Il pacchetto installabile per `v0.3.1` è il **package modulare**: il monolite generato più la cartella dei moduli `ctrl_def_mods\`, senza cartella contenitrice:
+Il pacchetto installabile per `v0.3.2` è il **package modulare**: il monolite generato più la cartella dei moduli `ctrl_def_mods\`, senza cartella contenitrice:
 
 ```
-def_controller_auto_v0.3.1.zip
+def_controller_auto_v0.3.2.zip
 ├── __init__.py              (monolite generato)
 ├── blender_manifest.toml
 ├── README.md
@@ -208,7 +208,7 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 
 ---
 
-## ⚠️ Limitazioni Note e Roadmap (post `v0.3.1`)
+## ⚠️ Limitazioni Note e Roadmap (post `v0.3.2`)
 
 - I workflow supportano le catene **FK**; l'IK è coperto dal target rapido su catene di 2‑3 controller (`ctrl_def.add_ik`), mentre lo **switch automatico IK/FK** è previsto per `v2`.
 - I widget si appoggiano all'estensione opzionale **Bone Widget** (il pannello offre il link diretto di installazione): nessuna libreria di widget integrata.

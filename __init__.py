@@ -2,7 +2,7 @@
 bl_info = {
     "name": "Auto Rig Layers (DEF / MCH / ORG / CTRL)",
     "author": "Pierfrancesco Diodato",
-    "version": (0, 3, 1),
+    "version": (0, 3, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > DEF Ctrl",
     "description": "Multi-layer rig pipeline (DEF, ORG, MCH, CTRL), World +Y IK, and Bone Widget integration",
