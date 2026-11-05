@@ -79,7 +79,11 @@ def _bonewidget_create(arm, names, shape_name, size):
             bpy.ops.object.mode_set(mode='POSE')
         # Solo i controller generati devono ricevere il widget
         for pbone in arm.pose.bones:
-            pbone.select = pbone.name in set(names)
+            _sel = pbone.name in set(names)
+            if hasattr(pbone, "select"):
+                pbone.select = _sel
+            else:
+                pbone.bone.select = _sel
         bpy.context.window_manager.widget_list = shape_name
         bpy.ops.bonewidget.create_widget(
             relative_size=True, global_size_simple=size)
