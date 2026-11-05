@@ -143,13 +143,13 @@ def test_registration_elements():
     assert stg.lock_mch_org is True, "lock_mch_org deve essere attivo di default"
     assert stg.ik_align_world_y is True, "ik_align_world_y deve essere attivo di default"
     assert stg.ik_create_pole is False, "ik_create_pole deve essere disattivo di default"
-    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.3.0
+    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.3.1
     mod = _addon_module()
     assert mod is not None, "Modulo dell'addon non trovato: impossibile leggere bl_info"
     bl_info = mod.bl_info
     assert bl_info["author"] == "Pierfrancesco Diodato", \
         f"bl_info['author'] inatteso: {bl_info['author']!r}"
-    assert tuple(bl_info["version"]) == (0, 3, 0), \
+    assert tuple(bl_info["version"]) == (0, 3, 1), \
         f"bl_info['version'] inattesa: {bl_info['version']!r}"
     # Nome e categoria esposti, bl_idname non devono cambiare
     assert bl_info["name"] == "Auto Rig Layers (DEF / MCH / ORG / CTRL)", \
@@ -720,8 +720,8 @@ def test_bind_actd_rotazione():
         mappa = json.load(file_json)
     assert mappa.get("armature") == arm_obj.name, \
         f"armature nel JSON: {mappa.get('armature')!r} invece di {arm_obj.name!r}"
-    assert mappa.get("version") == "0.3.0", \
-        f"version nel JSON: {mappa.get('version')!r} invece di '0.3.0'"
+    assert mappa.get("version") == "0.3.1", \
+        f"version nel JSON: {mappa.get('version')!r} invece di '0.3.1'"
     assert mappa["mapping"]["arm.L"]["def"] == "DEF_arm.L", \
         f"Mappatura arm.L errata nel JSON: {mappa['mapping'].get('arm.L')!r}"
     assert set(mappa["mapping"].keys()) == {"arm.L", "forearm.L", "hand.L"}, \

@@ -3,6 +3,11 @@
 Tutte le modifiche notevoli di questo progetto verranno documentate in questo
 file. Il formato si basa su [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.1] - 2026-11-05
+
+### Fixed
+- Bump di versione per nuovo upload su Blender Extensions (nessuna modifica funzionale rispetto a 0.3.0).
+
 ## [0.3.0] - 2026-11-04
 
 ### Added
