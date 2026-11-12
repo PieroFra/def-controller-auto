@@ -3,6 +3,12 @@
 Tutte le modifiche notevoli di questo progetto verranno documentate in questo
 file. Il formato si basa su [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.3] - 2026-11-13
+
+### Changed
+- Packaging: repeatable package_release.ps1 build with verified clean install in an isolated Blender profile.
+- Added a new end-to-end check covering the controller bone rename path.
+
 ## [0.3.2] - 2026-11-05
 
 ### Fixed

@@ -6,6 +6,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 from mathutils import Vector
@@ -38,6 +39,19 @@ def _addon_module():
     sys.modules["ctrl_def_addon"] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+def _versione_manifest():
+    """Versione "X.Y.Z" letta da blender_manifest.toml: sorgente indipendente da bl_info.
+
+    Il manifest e' la fonte per l'Extensions; bl_info deve coincidere con lui
+    (lo controlla anche scripts/build_monolith.py prima della build).
+    """
+    percorso = os.path.join(_REPO_ROOT, "blender_manifest.toml")
+    with open(percorso, "r", encoding="utf-8") as file_toml:
+        trovata = re.search(r'^version\s*=\s*"(\d+\.\d+\.\d+)"', file_toml.read(), re.M)
+    assert trovata, f"campo 'version' assente in {percorso}"
+    return trovata.group(1)
 
 
 def _reset():
@@ -143,14 +157,15 @@ def test_registration_elements():
     assert stg.lock_mch_org is True, "lock_mch_org deve essere attivo di default"
     assert stg.ik_align_world_y is True, "ik_align_world_y deve essere attivo di default"
     assert stg.ik_create_pole is False, "ik_create_pole deve essere disattivo di default"
-    # Metadati allineati a blender_manifest.toml (maintainer) e versione 0.3.2
+    # Metadati allineati a blender_manifest.toml (maintainer) e versione del manifest
     mod = _addon_module()
     assert mod is not None, "Modulo dell'addon non trovato: impossibile leggere bl_info"
     bl_info = mod.bl_info
     assert bl_info["author"] == "Pierfrancesco Diodato", \
         f"bl_info['author'] inatteso: {bl_info['author']!r}"
-    assert tuple(bl_info["version"]) == (0, 3, 2), \
-        f"bl_info['version'] inattesa: {bl_info['version']!r}"
+    versione_attesa = _versione_manifest()
+    assert ".".join(str(n) for n in bl_info["version"]) == versione_attesa, \
+        f"bl_info['version'] {bl_info['version']!r} diversa dal manifest {versione_attesa!r}"
     # Nome e categoria esposti, bl_idname non devono cambiare
     assert bl_info["name"] == "Auto Rig Layers (DEF / MCH / ORG / CTRL)", \
         f"bl_info['name'] inatteso: {bl_info['name']!r}"
@@ -720,8 +735,9 @@ def test_bind_actd_rotazione():
         mappa = json.load(file_json)
     assert mappa.get("armature") == arm_obj.name, \
         f"armature nel JSON: {mappa.get('armature')!r} invece di {arm_obj.name!r}"
-    assert mappa.get("version") == "0.3.2", \
-        f"version nel JSON: {mappa.get('version')!r} invece di '0.3.2'"
+    versione_attesa = _versione_manifest()
+    assert mappa.get("version") == versione_attesa, \
+        f"version nel JSON: {mappa.get('version')!r} invece di {versione_attesa!r}"
     assert mappa["mapping"]["arm.L"]["def"] == "DEF_arm.L", \
         f"Mappatura arm.L errata nel JSON: {mappa['mapping'].get('arm.L')!r}"
     assert set(mappa["mapping"].keys()) == {"arm.L", "forearm.L", "hand.L"}, \
