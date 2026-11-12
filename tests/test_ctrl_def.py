@@ -1145,6 +1145,53 @@ def test_presets():
         f"Riepilogo JSON senza la collisione attesa: {salvata}"
 
 
+def test_rinomina_bone_mantiene_shape_e_constraint():
+    # Rinominare un bone via bone.name: il custom_shape resta sullo stesso
+    # oggetto, il subtarget del constraint segue il nuovo nome, i conteggi
+    # non cambiano e il vecchio nome non risolve piu' nessun bone.
+    _reset()
+    arm_obj, arm_data = _new_armature("RigRinomina")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "A", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "B", (0.0, 0.0, 1.5), (0.0, 0.0, 2.0), "A")
+    bpy.ops.object.mode_set(mode='OBJECT')
+    forma = bpy.data.objects.new("WidgetRinomina", bpy.data.meshes.new("WidgetRinomina"))
+    bpy.context.scene.collection.objects.link(forma)
+    pb_b = arm_obj.pose.bones["B"]
+    pb_b.custom_shape = forma
+    con = pb_b.constraints.new('COPY_LOCATION')
+    con.target = arm_obj
+    con.subtarget = "A"
+    ossa_prima = len(arm_data.bones)
+    vincoli_prima = sum(len(pb.constraints) for pb in arm_obj.pose.bones)
+    assert ossa_prima == 2, f"Ossa attese prima della rinomina: 2, trovate {ossa_prima}"
+    assert vincoli_prima == 1, f"Vincoli attesi prima della rinomina: 1, trovati {vincoli_prima}"
+
+    arm_data.bones["A"].name = "A_renamed"
+
+    pb_b = arm_obj.pose.bones["B"]
+    assert pb_b.custom_shape is not None, "custom_shape di B perso dopo la rinomina di A"
+    assert pb_b.custom_shape.name == "WidgetRinomina", \
+        f"custom_shape di B cambiato dopo la rinomina: {pb_b.custom_shape.name!r}"
+    assert pb_b.custom_shape == forma, "custom_shape di B non punta piu' allo stesso oggetto"
+    assert len(pb_b.constraints) == 1, \
+        f"Constraint di B cambiati dopo la rinomina: {len(pb_b.constraints)}"
+    assert pb_b.constraints[0].subtarget == "A_renamed", \
+        f"Subtarget del constraint di B non seguito la rinomina: {pb_b.constraints[0].subtarget!r}"
+    assert len(arm_data.bones) == ossa_prima, \
+        f"Conteggio ossa cambiato dopo la rinomina: {ossa_prima} -> {len(arm_data.bones)}"
+    vincoli_dopo = sum(len(pb.constraints) for pb in arm_obj.pose.bones)
+    assert vincoli_dopo == vincoli_prima, \
+        f"Conteggio vincoli cambiato dopo la rinomina: {vincoli_prima} -> {vincoli_dopo}"
+    accesso_vecchio_nome_fallito = False
+    try:
+        arm_data.bones["A"]
+    except KeyError:
+        accesso_vecchio_nome_fallito = True
+    assert accesso_vecchio_nome_fallito, \
+        "L'accesso alle ossa per il vecchio nome 'A' non ha sollevato KeyError"
+
+
 def _registra_addon_se_mancante():
     """Carica e registra ../__init__.py se l'addon non e' ancora caricato.
 
@@ -1165,4 +1212,5 @@ if __name__ == "__main__":
     test_parent_chain_fk()
     test_bind_actd_rotazione()
     test_presets()
-    print("RISULTATO passati=5 falliti=0 totale=5")
+    test_rinomina_bone_mantiene_shape_e_constraint()
+    print("RISULTATO passati=6 falliti=0 totale=6")
