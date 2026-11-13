@@ -4,19 +4,19 @@
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
-[![Version](https://img.shields.io/badge/version-0.3.2-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
+[![Version](https://img.shields.io/badge/version-0.3.3-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.3.2`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
+Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.3.3`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
 
 | | |
 |---|---|
 | **Compatibility** | **Blender 4.2 LTS — 5.2+** |
 | **Category** | **Rigging** |
-| **Version** | **0.3.2** |
+| **Version** | **0.3.3** |
 | **Author** | **Pierfrancesco Diodato** |
 | **Type** | Add-on (installable ZIP or folder) |
 | **License** | GPL-3.0-or-later |

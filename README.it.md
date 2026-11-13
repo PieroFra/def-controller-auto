@@ -4,19 +4,19 @@
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
-[![Version](https://img.shields.io/badge/version-0.3.2-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
+[![Version](https://img.shields.io/badge/version-0.3.3-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`) — **Auto Rig Layers** (`v0.3.2`): pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycle.
+Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`) — **Auto Rig Layers** (`v0.3.3`): pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycle.
 
 | | |
 |---|---|
 | **Compatibilità** | **Blender 4.2 LTS — 5.2+** |
 | **Categoria** | **Rigging** |
-| **Versione** | **0.3.2** |
+| **Versione** | **0.3.3** |
 | **Autore** | **Pierfrancesco Diodato** |
 | **Tipo** | Add-on (ZIP installabile o cartella) |
 | **Licenza** | GPL-3.0-or-later |
