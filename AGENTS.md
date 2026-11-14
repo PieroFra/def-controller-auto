@@ -4,8 +4,8 @@ Questo file è l'unica fonte operativa per gli agenti che lavorano su questo pro
 Rispettala alla lettera.
 
 ## 0. DOVE SIAMO
-Workspace: C:\Users\checc\Desktop\BLENDER ADDONS\
-Progetto: C:\Users\checc\Desktop\BLENDER ADDONS\CTRL_DEF\
+Workspace: ..\
+Progetto: .\ (questa cartella)
 
 ```
 CTRL_DEF\
