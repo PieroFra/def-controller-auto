@@ -76,7 +76,7 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 | `ctrldef_033_16x9.mp4` | 1920x1080 (16:9) | Generate Controllers from a `DEF_` chain, IK target on World `+Y` with automatic pole |
 | `ctrldef_033_9x16.mp4` | 1080x1920 (9:16) | Same workflow, vertical cut for Reels and Shorts |
 
-**[Watch the demo video (16:9 MP4)](https://github.com/PieroFra/def-controller-auto/releases/download/v0.3.3/ctrldef_033_16x9.mp4)**
+https://github.com/user-attachments/assets/d5d18de4-0b35-4eca-9a22-9807d5ef4429
 
 **[Vertical 9:16 cut](https://github.com/PieroFra/def-controller-auto/releases/download/v0.3.3/ctrldef_033_9x16.mp4)**
 
