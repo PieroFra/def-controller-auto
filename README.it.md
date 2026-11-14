@@ -69,30 +69,18 @@ Genera in un click bone controller tracciati, colorati e dotati di **custom shap
 
 ---
 
-## 📸 Anteprime (Screenshots & Demo GIF)
+## 📸 Video Demo (v0.3.3)
 
-| File | Contenuto |
-|---|---|
-| `docs/images/01_before_def_bones.png` | Armatura con i bone `DEF_` selezionati e il pannello **DEF Ctrl** aperto nella Sidebar (`N`). |
-| `docs/images/02_after_ctrl_generated.png` | Dopo **Genera Controller** con preset *Arto Bipede (Cubo/Rosso/Mirror)*: controller colorati in Pose Mode. |
-| `docs/images/demo.gif` | Demo animata: onda di rotazione sulla catena di controller generati. |
-| `docs/images/03_ik_world_y_and_pole.png` | Catena IK con target allineato a `+Y` mondo e pole target automatico (`ctrl_def.add_ik`). |
+| Video | Formato | Contenuto |
+|---|---|---|
+| `ctrldef_033_16x9.mp4` | 1920x1080 (16:9) | Genera Controller da una catena `DEF_`, target IK su `+Y` mondo con pole automatico |
+| `ctrldef_033_9x16.mp4` | 1080x1920 (9:16) | Stesso flusso, taglio verticale per Reels e Shorts |
 
-![Armatura con bone DEF selezionati e pannello DEF Ctrl](docs/images/01_before_def_bones.png)
+**[Guarda il video demo (MP4 16:9)](https://github.com/PieroFra/def-controller-auto/releases/download/v0.3.3/ctrldef_033_16x9.mp4)**
 
-*Figura 1 — Armatura con i bone `DEF_` selezionati (nomi e assi visibili) e il pannello **Controller DEF** aperto nella Sidebar (`N`) → scheda **DEF Ctrl**.*
+**[Taglio verticale 9:16](https://github.com/PieroFra/def-controller-auto/releases/download/v0.3.3/ctrldef_033_9x16.mp4)**
 
-![Controller generati in Pose Mode](docs/images/02_after_ctrl_generated.png)
-
-*Figura 2 — Dopo **Genera Controller** con preset **Arto Bipede** (Cubo/Rosso/Mirror): forme personalizzate condivise colorate in Pose Mode e box di stato aggiornato (`DEF trovati: 3 | CTRL generati: 3`).*
-
-![Demo animata: rotazione della catena di controller](docs/images/demo.gif)
-
-*Figura 3 — Demo animata: onda di rotazione sulla catena di controller generati.*
-
-![Target IK allineato a +Y mondo con pole automatico](docs/images/03_ik_world_y_and_pole.png)
-
-*Figura 4 — Catena IK da `ctrl_def.add_ik`: target allineato a `+Y` mondo (`roll = 0.0`) in cima alla catena e pole automatico lungo la direzione di piega.*
+Entrambi i file sono allegati alla [release GitHub v0.3.3](https://github.com/PieroFra/def-controller-auto/releases/tag/v0.3.3).
 
 ---
 
