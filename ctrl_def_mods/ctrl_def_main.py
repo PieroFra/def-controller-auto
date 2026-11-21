@@ -4,11 +4,18 @@ from bpy.props import PointerProperty
 
 from .ctrl_def_generation import CTRLDEF_OT_generate
 from .ctrl_def_operators import (CTRLDEF_OT_add_ik, CTRLDEF_OT_apply_preset,
-                                 CTRLDEF_OT_bind_actd,
-                                 CTRLDEF_OT_create_widget,
-                                 CTRLDEF_OT_diagnose, CTRLDEF_OT_export_csv,
-                                 CTRLDEF_OT_export_json, CTRLDEF_OT_load_preset,
-                                 CTRLDEF_OT_remove, CTRLDEF_OT_save_preset)
+                                 CTRLDEF_OT_auto_collection,
+                                 CTRLDEF_OT_bake_ik_to_fk, CTRLDEF_OT_bind_actd,
+                                 CTRLDEF_OT_character_picker,
+                                 CTRLDEF_OT_create_widget, CTRLDEF_OT_diagnose,
+                                 CTRLDEF_OT_export_csv, CTRLDEF_OT_export_json,
+                                 CTRLDEF_OT_handoff_animator,
+                                 CTRLDEF_OT_load_preset, CTRLDEF_OT_manifest, CTRLDEF_OT_manifest_diff, CTRLDEF_OT_naming_doctor, CTRLDEF_OT_remove,
+                                 CTRLDEF_OT_restore_rigger,
+                                 CTRLDEF_OT_rig_score,
+                                 CTRLDEF_OT_remap,
+                                 CTRLDEF_OT_save_preset, CTRLDEF_OT_set_ik_target_space,
+                                 CTRLDEF_OT_snap_ik_to_fk)
 from .ctrl_def_properties import CTRLDEF_PG_settings
 from .ctrl_def_ui import CTRLDEF_PT_panel
 
@@ -21,11 +28,23 @@ _classes = [
     CTRLDEF_OT_generate,
     CTRLDEF_OT_create_widget,
     CTRLDEF_OT_diagnose,
+    CTRLDEF_OT_rig_score,
     CTRLDEF_OT_add_ik,
+    CTRLDEF_OT_auto_collection,
+    CTRLDEF_OT_character_picker,
+    CTRLDEF_OT_handoff_animator,
+    CTRLDEF_OT_restore_rigger,
+    CTRLDEF_OT_set_ik_target_space,
+    CTRLDEF_OT_snap_ik_to_fk,
+    CTRLDEF_OT_remap,
+    CTRLDEF_OT_bake_ik_to_fk,
     CTRLDEF_OT_export_json,
     CTRLDEF_OT_export_csv,
     CTRLDEF_OT_save_preset,
     CTRLDEF_OT_load_preset,
+    CTRLDEF_OT_manifest,
+    CTRLDEF_OT_manifest_diff,
+    CTRLDEF_OT_naming_doctor,
     CTRLDEF_OT_bind_actd,
     CTRLDEF_OT_remove,
     CTRLDEF_PT_panel,
@@ -67,3 +86,5 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+
+

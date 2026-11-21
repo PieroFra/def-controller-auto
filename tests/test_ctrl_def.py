@@ -834,6 +834,23 @@ def test_bind_actd_rotazione():
         pbone = arm_obj.pose.bones[nm]
         sel = pbone.select if hasattr(pbone, "select") else getattr(pbone.bone, "select", False)
         assert sel is True, f"Pose bone {nm} non selezionato dopo _seleziona_posa"
+    # Con il default (ik_chain_length=2) una catena di 3 viene scartata:
+    # _selected_ctrl_chains la ignora e add_ik segnala WARNING (CANCELLED).
+    stg_ik = bpy.context.scene.ctrl_def_settings
+    assert getattr(stg_ik, "ik_chain_length", 2) == 2, \
+        f"ik_chain_length di default inatteso: {getattr(stg_ik, 'ik_chain_length', None)!r}"
+    assert mod._selected_ctrl_chains(arm_obj) == [], \
+        "Con ik_chain_length=2 la catena di 3 non deve essere accettata"
+    assert mod._selected_ctrl_chains(arm_obj, max_chain_length=8) == \
+        [["arm.L", "forearm.L", "hand.L"]], \
+        "La catena di 3 deve restare leggibile alzando il limite"
+    res_ik_warn = bpy.ops.ctrl_def.add_ik()
+    assert res_ik_warn == {'CANCELLED'}, \
+        f"add_ik su catena troppo lunga (default 2): {res_ik_warn} invece di {{'CANCELLED'}}"
+    # Si alza il limite a 3 e si procede con la catena di 3
+    stg_ik.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
     catene_lette = mod._selected_ctrl_chains(arm_obj)
     assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
         f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
@@ -1208,6 +1225,347 @@ def test_rinomina_bone_mantiene_shape_e_constraint():
         "L'accesso alle ossa per il vecchio nome 'A' non ha sollevato KeyError"
 
 
+def test_snap_ik_to_fk():
+    # Fase F (v0.4.0): snap IK->FK. L'operatore ctrl_def.snap_ik_to_fk non
+    # esiste ancora: il test e' Red finche' non viene implementato.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigSnapIK")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        assert pbone is not None, f"Controller {nm} assente prima di add_ik"
+    registro_ik = mod._read_registry(arm_obj)
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        assert nm in registro_ik, \
+            f"Controller {nm} non registrato prima di add_ik: {sorted(registro_ik)}"
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    bone_ik = arm_data.bones.get("IK_hand.L")
+    assert bone_ik is not None, "Target IK_hand.L non creato da add_ik"
+
+    # Posizione arbitraria del target IK per piegare la catena.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    pb_ik = arm_obj.pose.bones["IK_hand.L"]
+    pb_ik.location = (0.4, 0.1, -0.2)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    pos_ik = arm_eval.pose.bones["hand.L"].matrix.translation.copy()
+
+    # Snap IK -> FK: i controller FK devono assumere la posa della catena IK.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_snap = bpy.ops.ctrl_def.snap_ik_to_fk()
+    assert res_snap == {'FINISHED'}, f"snap_ik_to_fk fallito con status: {res_snap}"
+
+    # I valori FK sono stati scritti: con il constraint IK mutato la posa
+    # della catena deve restare identica a quella IK.
+    con_ik = arm_obj.pose.bones["arm.L"].constraints.get("CTRL_DEF_IK")
+    assert con_ik is not None, \
+        "Il constraint IK CTRL_DEF_IK e' stato rimosso da snap_ik_to_fk"
+    con_ik.mute = True
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    arm_eval2 = arm_obj.evaluated_get(dg2)
+    pos_fk = arm_eval2.pose.bones["hand.L"].matrix.translation.copy()
+    con_ik.mute = False
+    err_pos = (pos_fk - pos_ik).length
+    assert err_pos < 1e-3, \
+        f"Snap non ha scritto i valori FK: errore posizione {err_pos:.6f}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_auto_collection():
+    # M4 (v0.5.0): Auto-Organizzazione Collection. L'operatore
+    # ctrl_def.auto_collection non esiste ancora: il test e' Red finche'
+    # non viene implementato.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.ik_create_pole = True
+    arm_obj, arm_data = _new_armature("RigAutoColl")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        assert arm_obj.pose.bones.get(nm) is not None, \
+            f"Controller {nm} assente prima di add_ik"
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    assert arm_data.bones.get("IK_hand.L") is not None, \
+        "Target IK_hand.L non creato da add_ik"
+    assert arm_data.bones.get("IK_hand.L_pole") is not None, \
+        "Pole IK_hand.L_pole non creato da add_ik"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.update()
+
+    # Snapshot prima della chiamata: nessuna delle collection IK/DEF esiste.
+    assert arm_data.collections.get("CTRLS") is not None, "CTRLS mancante prima di auto_collection"
+    res_ac = bpy.ops.ctrl_def.auto_collection()
+    assert res_ac == {'FINISHED'}, f"auto_collection fallito con status: {res_ac}"
+
+    # 1) Esistenza delle collection CTRLS/IK/DEF.
+    for cname in ("CTRLS", "IK", "DEF"):
+        assert arm_data.collections.get(cname) is not None, \
+            f"Bone collection {cname} mancante dopo auto_collection"
+
+    # 2) Appartenenza dei bone alle collection giuste.
+    coll_ctrls = arm_data.collections.get("CTRLS")
+    ossa_ctrls = {b.name for b in coll_ctrls.bones}
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        assert nm in ossa_ctrls, \
+            f"{nm} non e' in CTRLS dopo auto_collection: {sorted(ossa_ctrls)}"
+
+    coll_ik = arm_data.collections.get("IK")
+    ossa_ik = {b.name for b in coll_ik.bones}
+    assert "IK_hand.L" in ossa_ik, \
+        f"IK_hand.L non e' in IK dopo auto_collection: {sorted(ossa_ik)}"
+    assert "IK_hand.L_pole" in ossa_ik, \
+        f"IK_hand.L_pole non e' in IK dopo auto_collection: {sorted(ossa_ik)}"
+
+    coll_def = arm_data.collections.get("DEF")
+    ossa_def = {b.name for b in coll_def.bones}
+    for nm in ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"):
+        assert nm in ossa_def, \
+            f"{nm} non e' in DEF dopo auto_collection: {sorted(ossa_def)}"
+
+    # 3) Idempotenza: secondo richiamo non duplica collection ne' membership.
+    snap_ctrls = frozenset(ossa_ctrls)
+    snap_ik = frozenset(ossa_ik)
+    snap_def = frozenset(ossa_def)
+    n_coll = len(arm_data.collections)
+    res_ac2 = bpy.ops.ctrl_def.auto_collection()
+    assert res_ac2 == {'FINISHED'}, f"Secondo auto_collection fallito: {res_ac2}"
+    assert len(arm_data.collections) == n_coll, \
+        f"auto_collection ha duplicato collection: {n_coll} -> {len(arm_data.collections)}"
+    assert frozenset(b.name for b in arm_data.collections.get("CTRLS").bones) == snap_ctrls, \
+        "Membership CTRLS cambiata al secondo richiamo"
+    assert frozenset(b.name for b in arm_data.collections.get("IK").bones) == snap_ik, \
+        "Membership IK cambiata al secondo richiamo"
+    assert frozenset(b.name for b in arm_data.collections.get("DEF").bones) == snap_def, \
+        "Membership DEF cambiata al secondo richiamo"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_auto_collection_mch_org_unassign():
+    # Difetto 3: auto_collection organizza solo CTRLS/IK/DEF. Mancano le
+    # collection MCH e ORG (ossa MCH_/ORG_ restano fuori) e un controller
+    # finito per errore in DEF non viene spostato in CTRLS: resta nella
+    # collection sbagliata. Il test e' Red sul comportamento attuale.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.pipeline_mode = "DEF_ORG_MCH_CTRL"
+    arm_obj, arm_data = _new_armature("RigAutoCollMchOrg")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "ORG_spine", (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    _add_bone(arm_data, "MCH_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "hand.L", (0.0, 0.0, 1.5), (0.0, 0.0, 1.7))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.update()
+
+    mod = _addon_module()
+    # hand.L e' un controller registrato: deve finire in CTRLS.
+    mod._write_registry(arm_obj, {"hand.L": {"def": "DEF_hand.L"}})
+
+    # Errore di partenza: il controller e' nella collection sbagliata (DEF).
+    coll_def_iniziale = arm_data.collections.new("DEF")
+    coll_def_iniziale.assign(arm_data.bones["hand.L"])
+    nomi_coll_hand = {c.name for c in arm_data.bones["hand.L"].collections}
+    assert "DEF" in nomi_coll_hand, \
+        f"Setup errato: hand.L non e' in DEF prima del test: {sorted(nomi_coll_hand)}"
+
+    res_ac = bpy.ops.ctrl_def.auto_collection()
+    assert res_ac == {'FINISHED'}, f"auto_collection fallito con status: {res_ac}"
+    bpy.context.view_layer.update()
+
+    def _ossa(cname):
+        coll = arm_data.collections.get(cname)
+        assert coll is not None, f"Bone collection {cname} mancante dopo auto_collection"
+        return {b.name for b in coll.bones}
+
+    # 1) Esistenza delle collection, comprese MCH e ORG. IK e' assente perche'
+    #    vuota: auto_collection elimina le collection gestite senza bone.
+    for cname in ("CTRLS", "DEF", "MCH", "ORG"):
+        _ossa(cname)
+    coll_ik = arm_data.collections.get("IK")
+    assert coll_ik is None or len(list(coll_ik.bones)) > 0, \
+        "IK e' rimasta vuota dopo auto_collection"
+
+    # 2) Le ossa MCH_/ORG_ finiscono nelle rispettive collection.
+    ossa_org = _ossa("ORG")
+    assert "ORG_spine" in ossa_org, \
+        f"ORG_spine non e' in ORG dopo auto_collection: {sorted(ossa_org)}"
+    ossa_mch = _ossa("MCH")
+    assert "MCH_arm.L" in ossa_mch, \
+        f"MCH_arm.L non e' in MCH dopo auto_collection: {sorted(ossa_mch)}"
+
+    # 3) hand.L e' in CTRLS e non resta nella collection sbagliata DEF.
+    ossa_ctrls = _ossa("CTRLS")
+    assert "hand.L" in ossa_ctrls, \
+        f"hand.L non e' in CTRLS dopo auto_collection: {sorted(ossa_ctrls)}"
+    ossa_def = _ossa("DEF")
+    assert "hand.L" not in ossa_def, \
+        f"hand.L e' rimasto in DEF dopo auto_collection: {sorted(ossa_def)}"
+    nomi_coll_hand = {c.name for c in arm_data.bones["hand.L"].collections}
+    assert "DEF" not in nomi_coll_hand, \
+        f"hand.L ha ancora la collection sbagliata DEF: {sorted(nomi_coll_hand)}"
+
+    # 4) Idempotenza: il secondo richiamo non duplica collezioni ne' membership.
+    snap_org = frozenset(ossa_org)
+    snap_mch = frozenset(ossa_mch)
+    snap_ctrls = frozenset(ossa_ctrls)
+    snap_def = frozenset(ossa_def)
+    n_coll = len(arm_data.collections)
+    res_ac2 = bpy.ops.ctrl_def.auto_collection()
+    assert res_ac2 == {'FINISHED'}, f"Secondo auto_collection fallito: {res_ac2}"
+    assert len(arm_data.collections) == n_coll, \
+        f"auto_collection ha duplicato collection: {n_coll} -> {len(arm_data.collections)}"
+    assert frozenset(_ossa("ORG")) == snap_org, \
+        "Membership ORG cambiata al secondo richiamo"
+    assert frozenset(_ossa("MCH")) == snap_mch, \
+        "Membership MCH cambiata al secondo richiamo"
+    assert frozenset(_ossa("CTRLS")) == snap_ctrls, \
+        "Membership CTRLS cambiata al secondo richiamo"
+    assert frozenset(_ossa("DEF")) == snap_def, \
+        "Membership DEF cambiata al secondo richiamo"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_handoff_animatore():
+    # M5 (v0.5.0): Handoff Animatore One-Click. L'operatore
+    # ctrl_def.handoff_animator (e il suo inverso ctrl_def.restore_rigger)
+    # non esiste ancora: il test e' Red finche' non viene implementato.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.pipeline_mode = "DEF_ORG_MCH_CTRL"
+    arm_obj, arm_data = _new_armature("RigHandoff")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione fallita: {res}"
+    res_ac = bpy.ops.ctrl_def.auto_collection()
+    assert res_ac == {'FINISHED'}, f"auto_collection fallito: {res_ac}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
+    bpy.context.view_layer.update()
+
+    coll_nomi = ("CTRLS", "DEF", "MCH", "ORG")
+    vis_originale = {}
+    for cn in coll_nomi:
+        coll = arm_data.collections.get(cn)
+        if coll is not None:
+            vis_originale[cn] = bool(getattr(coll, "is_visible", True))
+    lock_originale = {}
+    for cn in ("MCH", "ORG"):
+        coll = arm_data.collections.get(cn)
+        if coll is None:
+            continue
+        for b in coll.bones:
+            pb = arm_obj.pose.bones.get(b.name)
+            if pb is None:
+                continue
+            lock_originale[b.name] = (
+                tuple(getattr(pb, "lock_location", (False, False, False))),
+                tuple(getattr(pb, "lock_rotation", (False, False, False))),
+                bool(getattr(pb, "lock_rotation_w", False)),
+                tuple(getattr(pb, "lock_scale", (False, False, False))),
+            )
+
+    res_h = bpy.ops.ctrl_def.handoff_animator()
+    assert res_h == {'FINISHED'}, f"handoff_animator fallito: {res_h}"
+
+    coll_ctrls = arm_data.collections.get("CTRLS")
+    assert coll_ctrls is not None, "Collection CTRLS assente dopo handoff"
+    assert bool(getattr(coll_ctrls, "is_visible", False)) is True, "CTRLS non visibile dopo handoff_animator"
+    for b in coll_ctrls.bones:
+        pb = arm_obj.pose.bones.get(b.name)
+        assert pb is not None, f"Pose bone {b.name} assente"
+        try:
+            pb.select = True
+        except Exception as exc:
+            raise AssertionError(f"{b.name} non selezionabile: {exc}")
+
+    coll_def = arm_data.collections.get("DEF")
+    assert coll_def is not None, "Collection DEF assente dopo handoff"
+    assert bool(getattr(coll_def, "is_visible", True)) is False, "DEF non nascosta dopo handoff_animator"
+
+    for cn in ("MCH", "ORG"):
+        coll = arm_data.collections.get(cn)
+        if coll is None:
+            continue
+        for b in coll.bones:
+            pb = arm_obj.pose.bones.get(b.name)
+            assert pb is not None, f"Pose bone {b.name} assente"
+            assert tuple(getattr(pb, "lock_location", ())) == (True, True, True), f"{b.name} lock_location non bloccato"
+            assert tuple(getattr(pb, "lock_rotation", ())) == (True, True, True), f"{b.name} lock_rotation non bloccato"
+            assert bool(getattr(pb, "lock_rotation_w", False)) is True, f"{b.name} lock_rotation_w non bloccato"
+            assert tuple(getattr(pb, "lock_scale", ())) == (True, True, True), f"{b.name} lock_scale non bloccato"
+
+    res_r = bpy.ops.ctrl_def.restore_rigger()
+    assert res_r == {'FINISHED'}, f"restore_rigger fallito: {res_r}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
+    bpy.context.view_layer.update()
+
+    for cn in coll_nomi:
+        coll = arm_data.collections.get(cn)
+        if coll is None or cn not in vis_originale:
+            continue
+        assert bool(getattr(coll, "is_visible", None)) == vis_originale[cn], "Visibilita di " + cn + " non ripristinata"
+    for nome, stato in lock_originale.items():
+        pb = arm_obj.pose.bones.get(nome)
+        if pb is None:
+            continue
+        attuale = (
+            tuple(getattr(pb, "lock_location", ())),
+            tuple(getattr(pb, "lock_rotation", ())),
+            bool(getattr(pb, "lock_rotation_w", False)),
+            tuple(getattr(pb, "lock_scale", ())),
+        )
+        assert attuale == stato, "Lock di " + nome + " non ripristinato"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
 def _registra_addon_se_mancante():
     """Carica e registra ../__init__.py se l'addon non e' ancora caricato.
 
@@ -1221,12 +1579,2341 @@ def _registra_addon_se_mancante():
     return mod
 
 
+def test_bake_ik_to_fk():
+    # Fase G (v0.4.0): bake IK->FK. L'operatore ctrl_def.bake_ik_to_fk non
+    # esiste ancora: il test e' Red finche' non viene implementato.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigBakeIK")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        assert pbone is not None, f"Controller {nm} assente prima di add_ik"
+    registro_ik = mod._read_registry(arm_obj)
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        assert nm in registro_ik, \
+            f"Controller {nm} non registrato prima di add_ik: {sorted(registro_ik)}"
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    bone_ik = arm_data.bones.get("IK_hand.L")
+    assert bone_ik is not None, "Target IK_hand.L non creato da add_ik"
+
+    # Posizione arbitraria del target IK per piegare la catena.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    pb_ik = arm_obj.pose.bones["IK_hand.L"]
+    pb_ik.location = (0.4, 0.1, -0.2)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    pos_ik = arm_eval.pose.bones["hand.L"].matrix.translation.copy()
+    rot_ik = arm_eval.pose.bones["hand.L"].matrix.to_quaternion().copy()
+
+    # Bake IK -> FK: il constraint IK viene rimosso e i controller FK
+    # conservano la posa/rotazione baked.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    res_bake = bpy.ops.ctrl_def.bake_ik_to_fk()
+    assert res_bake == {'FINISHED'}, f"bake_ik_to_fk fallito con status: {res_bake}"
+
+    con_ik = arm_obj.pose.bones["arm.L"].constraints.get("CTRL_DEF_IK")
+    assert con_ik is None, \
+        "Il constraint IK CTRL_DEF_IK non e' stato rimosso da bake_ik_to_fk"
+
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    arm_eval2 = arm_obj.evaluated_get(dg2)
+    pos_baked = arm_eval2.pose.bones["hand.L"].matrix.translation.copy()
+    rot_baked = arm_eval2.pose.bones["hand.L"].matrix.to_quaternion().copy()
+    err_pos = (pos_baked - pos_ik).length
+    assert err_pos < 1e-3, \
+        f"Bake non ha conservato la posizione: errore {err_pos:.6f}"
+    err_rot = (rot_baked.rotation_difference(rot_ik)).angle
+    assert err_rot < 1e-3, \
+        f"Bake non ha conservato la rotazione: errore {err_rot:.6f} rad"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def _matrici_vicine(m1, m2, tolleranza=1e-6):
+    for riga in range(4):
+        for colonna in range(4):
+            if abs(m1[riga][colonna] - m2[riga][colonna]) > tolleranza:
+                return False
+    return True
+
+
+def _frames_animazione(dati_animazione):
+    fotogrammi = set()
+    if dati_animazione is None or getattr(dati_animazione, "action", None) is None:
+        return fotogrammi
+    azione = dati_animazione.action
+    for layer in getattr(azione, "layers", []):
+        for strip in getattr(layer, "strips", []):
+            for channelbag in getattr(strip, "channelbags", []):
+                for fcurve in getattr(channelbag, "fcurves", []):
+                    for punto in getattr(fcurve, "keyframe_points", []):
+                        fotogrammi.add(int(round(punto.co[0])))
+    return fotogrammi
+
+
+def test_snap_selezione_vuota():
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigSnapSelVuota")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    basis_prima = {}
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if pbone is not None:
+            basis_prima[nm] = pbone.matrix_basis.copy()
+
+    _seleziona_posa(arm_obj, None, False)
+    bpy.context.view_layer.update()
+
+    res_snap = None
+    try:
+        res_snap = bpy.ops.ctrl_def.snap_ik_to_fk()
+    except RuntimeError as exc:
+        assert "No 2-3 controller chain selected" in str(exc), \
+            f"Messaggio di rifiuto inatteso da snap_ik_to_fk: {exc}"
+        res_snap = {'CANCELLED'}
+    assert res_snap == {'CANCELLED'}, \
+        f"snap_ik_to_fk con selezione vuota: atteso CANCELLED, ottenuto {res_snap}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if pbone is None or nm not in basis_prima:
+            continue
+        assert _matrici_vicine(basis_prima[nm], pbone.matrix_basis), \
+            f"matrix_basis di {nm} mutata dopo snap CANCELLED"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_snap_catena_non_registrata():
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigSnapRegVuoto")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    basis_prima = {}
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if pbone is not None:
+            basis_prima[nm] = pbone.matrix_basis.copy()
+
+    mod._write_registry(arm_obj, {})
+    _seleziona_posa(arm_obj, None, False)
+    bpy.context.view_layer.update()
+
+    res_snap = None
+    try:
+        res_snap = bpy.ops.ctrl_def.snap_ik_to_fk()
+    except RuntimeError as exc:
+        assert "No registered controllers" in str(exc), \
+            f"Messaggio di rifiuto inatteso da snap_ik_to_fk: {exc}"
+        res_snap = {'CANCELLED'}
+    assert res_snap == {'CANCELLED'}, \
+        f"snap_ik_to_fk con registro vuoto: atteso CANCELLED, ottenuto {res_snap}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if pbone is None or nm not in basis_prima:
+            continue
+        assert _matrici_vicine(basis_prima[nm], pbone.matrix_basis), \
+            f"matrix_basis di {nm} mutata dopo snap CANCELLED"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_snap_armatura_senza_ik():
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigSnapSenzaIK")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    basis_prima = {}
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if pbone is not None:
+            basis_prima[nm] = pbone.matrix_basis.copy()
+
+    _seleziona_posa(arm_obj, None, False)
+    bpy.context.view_layer.update()
+
+    res_snap = None
+    try:
+        res_snap = bpy.ops.ctrl_def.snap_ik_to_fk()
+    except RuntimeError as exc:
+        assert "No 2-3 controller chain selected" in str(exc), \
+            f"Messaggio di rifiuto inatteso da snap_ik_to_fk: {exc}"
+        res_snap = {'CANCELLED'}
+    assert res_snap == {'CANCELLED'}, \
+        f"snap_ik_to_fk senza IK: atteso CANCELLED, ottenuto {res_snap}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if pbone is None or nm not in basis_prima:
+            continue
+        assert _matrici_vicine(basis_prima[nm], pbone.matrix_basis), \
+            f"matrix_basis di {nm} mutata dopo snap CANCELLED"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_snap_preserva_constraint_roll_ordine():
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigSnapRoll")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    arm_data.edit_bones["DEF_forearm.L"].roll = 0.6
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if hasattr(pbone, "select"):
+            pbone.select = True
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = True
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if hasattr(pbone, "select"):
+            pbone.select = True
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = True
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    rot_prima = arm_eval.pose.bones["hand.L"].matrix.to_quaternion().copy()
+
+    pb0 = arm_obj.pose.bones["arm.L"]
+    con_prima = pb0.constraints.get("CTRL_DEF_IK")
+    assert con_prima is not None, "Constraint IK assente prima dello snap"
+    stato_constraint = (con_prima.name, con_prima.chain_count,
+                        con_prima.subtarget, con_prima.use_tail,
+                        con_prima.target, con_prima.pole_subtarget)
+
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_snap = bpy.ops.ctrl_def.snap_ik_to_fk()
+    assert res_snap == {'FINISHED'}, f"snap_ik_to_fk fallito con status: {res_snap}"
+
+    con_dopo = arm_obj.pose.bones["arm.L"].constraints.get("CTRL_DEF_IK")
+    assert con_dopo is not None, "Constraint IK rimosso da snap_ik_to_fk"
+    # Il constraint deve restare lo stesso oggetto logico (stessi parametri)
+    stato_dopo = (con_dopo.name, con_dopo.chain_count,
+                  con_dopo.subtarget, con_dopo.use_tail,
+                  con_dopo.target, con_dopo.pole_subtarget)
+    assert stato_dopo == stato_constraint, \
+        f"Constraint IK mutato da snap: {stato_constraint} -> {stato_dopo}"
+
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    arm_eval2 = arm_obj.evaluated_get(dg2)
+    rot_dopo = arm_eval2.pose.bones["hand.L"].matrix.to_quaternion().copy()
+    err_rot = rot_prima.rotation_difference(rot_dopo).angle
+    assert err_rot < 1e-3, \
+        f"Snap non ha preservato la rotazione: errore {err_rot:.6f} rad"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_bake_frame_range():
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigBakeRange")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if hasattr(pbone, "select"):
+            pbone.select = True
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = True
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if hasattr(pbone, "select"):
+            pbone.select = True
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = True
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+
+    scn = bpy.context.scene
+    scn.frame_start = 10
+    scn.frame_end = 20
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    scn.frame_set(10)
+    pb_ik = arm_obj.pose.bones["IK_hand.L"]
+    pb_ik.location = (0.2, 0.1, -0.1)
+    pb_ik.keyframe_insert(data_path="location", frame=10)
+    scn.frame_set(20)
+    pb_ik.location = (0.5, 0.2, -0.3)
+    pb_ik.keyframe_insert(data_path="location", frame=20)
+    scn.frame_set(10)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    pos_ik_iniziale = arm_eval.pose.bones["hand.L"].matrix.translation.copy()
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_bake = bpy.ops.ctrl_def.bake_ik_to_fk()
+    assert res_bake == {'FINISHED'}, f"bake_ik_to_fk fallito con status: {res_bake}"
+
+    fotogrammi = _frames_animazione(arm_obj.animation_data)
+    assert fotogrammi, "Nessun keyframe prodotto dal bake nel range"
+    assert min(fotogrammi) >= 10, \
+        f"Keyframe fuori range (min={min(fotogrammi)})"
+    assert max(fotogrammi) <= 20, \
+        f"Keyframe fuori range (max={max(fotogrammi)})"
+    assert 10 in fotogrammi and 20 in fotogrammi, \
+        f"Keyframe mancanti agli estremi del range: {sorted(fotogrammi)}"
+
+    scn.frame_set(10)
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    arm_eval2 = arm_obj.evaluated_get(dg2)
+    pos_baked = arm_eval2.pose.bones["hand.L"].matrix.translation.copy()
+    err_pos = (pos_baked - pos_ik_iniziale).length
+    assert err_pos < 1e-3, \
+        f"Posa iniziale non corretta dopo bake: errore {err_pos:.6f}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_bake_doppia_esecuzione():
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigBakeDoppio")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if hasattr(pbone, "select"):
+            pbone.select = True
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = True
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        if hasattr(pbone, "select"):
+            pbone.select = True
+        if hasattr(pbone.bone, "select"):
+            pbone.bone.select = True
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    pb_ik = arm_obj.pose.bones["IK_hand.L"]
+    pb_ik.location = (0.4, 0.1, -0.2)
+    bpy.context.view_layer.update()
+
+    scn = bpy.context.scene
+    scn.frame_start = 1
+    scn.frame_end = 1
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_bake = bpy.ops.ctrl_def.bake_ik_to_fk()
+    assert res_bake == {'FINISHED'}, f"Primo bake fallito con status: {res_bake}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    pos_prima = arm_eval.pose.bones["hand.L"].matrix.translation.copy()
+
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_bake2 = None
+    try:
+        res_bake2 = bpy.ops.ctrl_def.bake_ik_to_fk()
+    except RuntimeError as exc:
+        assert "No 2-3 controller chain selected" in str(exc), \
+            f"Messaggio di rifiuto inatteso da bake_ik_to_fk: {exc}"
+        res_bake2 = {'CANCELLED'}
+    assert res_bake2 == {'CANCELLED'}, \
+        f"Secondo bake: atteso CANCELLED, ottenuto {res_bake2}"
+
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    arm_eval2 = arm_obj.evaluated_get(dg2)
+    pos_dopo = arm_eval2.pose.bones["hand.L"].matrix.translation.copy()
+    err_pos = (pos_dopo - pos_prima).length
+    assert err_pos < 1e-3, \
+        f"Posa mutata dal secondo bake: errore {err_pos:.6f}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_set_ik_target_space():
+    # Fase H (v0.4.0): space switching del target IK. L'operatore
+    # ctrl_def.set_ik_target_space e la proprieta' ik_target_space non
+    # esistono ancora: il test e' Red finche' non vengono implementati.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigSpaceIK")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        assert pbone is not None, f"Controller {nm} assente prima di add_ik"
+    registro_ik = mod._read_registry(arm_obj)
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        assert nm in registro_ik, \
+            f"Controller {nm} non registrato prima di add_ik: {sorted(registro_ik)}"
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    catene_lette = mod._selected_ctrl_chains(arm_obj)
+    assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
+        f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    bone_ik = arm_data.bones.get("IK_hand.L")
+    assert bone_ik is not None, "Target IK_hand.L non creato da add_ik"
+
+    # Posizione arbitraria del target IK per piegare la catena.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    pb_ik = arm_obj.pose.bones["IK_hand.L"]
+    pb_ik.location = (0.4, 0.1, -0.2)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    arm_eval = arm_obj.evaluated_get(dg)
+    posa_prima = arm_eval.pose.bones["hand.L"].matrix.copy()
+
+    # Space switch: il target IK passa in spazio LOCAL senza rompere la posa
+    # world della catena IK.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    res_space = bpy.ops.ctrl_def.set_ik_target_space(space='LOCAL')
+    assert res_space == {'FINISHED'}, \
+        f"set_ik_target_space fallito con status: {res_space}"
+    assert getattr(stg, "ik_target_space", None) == 'LOCAL', \
+        f"ik_target_space non aggiornata: {getattr(stg, 'ik_target_space', None)!r}"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    arm_eval2 = arm_obj.evaluated_get(dg2)
+    posa_dopo = arm_eval2.pose.bones["hand.L"].matrix.copy()
+    err = max(abs(posa_prima[r][c] - posa_dopo[r][c])
+             for r in range(4) for c in range(4))
+    assert err < 1e-3, \
+        f"Posa world della catena IK mutata dal cambio di space: errore {err:.6f}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_ik_pole_mesh_source():
+    # Modulo C (v0.4.x): auto-fit pole dalla direzione della mesh.
+    # Con ik_pole_source='MESH' il pole va calcolato dai vertici della mesh
+    # deformata associata all'armatura, non dalla sola bend_dir del bone.
+    # Red: la proprieta' ik_pole_source e la logica MESH non esistono ancora.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigPoleMesh")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    # Mesh semplice (quad) associata all'armatura, spostata su +X rispetto
+    # alla catena: la direzione dei vertici deve guidare il pole.
+    mesh_data = bpy.data.meshes.new("MeshPole")
+    mesh_obj = bpy.data.objects.new("MeshPole", mesh_data)
+    bpy.context.scene.collection.objects.link(mesh_obj)
+    verts = [(1.0, 0.0, 1.2), (1.0, 1.0, 1.2),
+             (1.0, 1.0, 2.0), (1.0, 0.0, 2.0)]
+    mesh_data.from_pydata(verts, [], [(0, 1, 2, 3)])
+    mesh_data.update()
+    mod_arm = mesh_obj.modifiers.new(name="Armature", type='ARMATURE')
+    mod_arm.object = arm_obj
+    mesh_obj.parent = arm_obj
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        pbone = arm_obj.pose.bones.get(nm)
+        assert pbone is not None, f"Controller {nm} assente prima di add_ik"
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    assert mod._selected_ctrl_chains(arm_obj) == [["arm.L", "forearm.L", "hand.L"]], \
+        "La catena di 3 deve essere leggibile prima di add_ik"
+    stg.ik_create_pole = True
+    # Nuova proprieta' (non esiste ancora -> Red)
+    assert hasattr(stg, "ik_pole_source"), \
+        "Proprieta' ik_pole_source mancante su CTRLDEF_PG_settings"
+    stg.ik_pole_source = 'MESH'
+    assert getattr(stg, "ik_pole_source", None) == 'MESH', \
+        f"ik_pole_source non impostata a MESH: {getattr(stg, 'ik_pole_source', None)!r}"
+
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    pole = arm_data.bones.get("IK_hand.L_pole")
+    assert pole is not None, "Target IK_hand.L_pole non creato da add_ik con pole=True"
+    # Il pole deve puntare nella direzione dei vertici della mesh (+X), non
+    # nella sola bend_dir del bone (che e' lungo Y).
+    assert pole.head_local.x > 0.1, \
+        f"Pole non allineato ai vertici della mesh (+X): head={tuple(round(c, 6) for c in pole.head_local)}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_rig_health_score():
+    # Modulo A: Rig Health Score integrato (voto 30esimi). L'operatore
+    # ctrl_def.rig_score non esiste ancora: il test e' Red finche' non viene
+    # implementato. Produce un report con voto/30 e ripartizione per categoria
+    # (STRUTTURA, CONTROLLI, DEFORMAZIONE, MANUTENIBILITA, CONSEGNA).
+    _reset()
+    arm_obj, arm_data = _new_armature("RigHealthScore")
+    bpy.ops.object.mode_set(mode='EDIT')
+    # Bone DEF valido (deform)
+    eb = _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    eb.use_deform = True
+    # Violazione: bone non-deform con nome sbagliato (controller senza custom shape)
+    eb2 = _add_bone(arm_data, "bad_controller", (0.0, 0.0, 2.0), (0.0, 0.0, 2.2))
+    eb2.use_deform = False
+    # Violazione: controller senza custom shape (nessuna shape assegnata)
+    eb3 = _add_bone(arm_data, "CTRL_noshape.L", (0.0, 0.0, 2.5), (0.0, 0.0, 2.7))
+    eb3.use_deform = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+
+    import io
+    import re
+    import sys
+
+    buf = io.StringIO()
+    stdout_precedente = sys.stdout
+    sys.stdout = buf
+    try:
+        res = bpy.ops.ctrl_def.rig_score()
+    finally:
+        sys.stdout = stdout_precedente
+    catturato = buf.getvalue()
+
+    # Il report puo' anche essere memorizzato sull'armatura (pattern diagnose):
+    # si concatena per coprire entrambe le implementazioni possibili.
+    testo = catturato
+    for chiave in ("_ctrl_def_last_rig_score", "_ctrl_def_rig_score",
+                   "ctrl_def_rig_score", "_ctrl_def_last_score"):
+        valore = arm_obj.get(chiave)
+        if valore is not None:
+            testo = testo + "\n" + str(valore)
+
+    assert res == {'FINISHED'}, f"ctrl_def.rig_score non FINISHED: {res}"
+
+    assert re.search(r"\d+\s*/\s*30", testo), \
+        f"Voto numerico /30 non trovato nel report: {testo!r}"
+
+    varianti = {
+        "STRUTTURA": ("STRUTTURA",),
+        "CONTROLLI": ("CONTROLLI",),
+        "DEFORMAZIONE": ("DEFORMAZIONE",),
+        "MANUTENIBILITA": ("MANUTENIBILITA", "MANUTENIBILITÀ", "MANUTENIBILITA'"),
+        "CONSEGNA": ("CONSEGNA",),
+    }
+    testo_upper = testo.upper()
+    presenti = [nome for nome, vars_ in varianti.items()
+                if any(v in testo_upper for v in vars_)]
+    assert len(presenti) >= 2, \
+        f"Attese almeno 2 categorie su 5, trovate {presenti}: {testo!r}"
+
+
+def test_rig_score_no_false_fail():
+    # Difetto 2 del report _esperimenti\report_test_funzionali.md: rig_score
+    # marca come FAIL bone sani. Un rig corretto ha ORG_/MCH_ e i pole IK
+    # referenziati solo dai constraint (pole_subtarget), i DEF appena generati
+    # senza bone collection e i LIMIT_ROTATION sui controller, non sui DEF.
+    # Red finche' 1.5, 5.1 e 5.2 non smettono di penalizzare questi casi.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.prefix_def = "DEF_"
+    stg.prefix_ctrl = ""
+    stg.parent = "CHAIN"
+    stg.mirror = False
+    stg.ik_create_pole = True
+    stg.ik_chain_length = 2
+
+    def_bones = [
+        ("DEF_root", (0, 0, 0), (0, 0.15, 0), None),
+        ("DEF_pelvis", (0, 0, 0.90), (0, 0, 1.05), "DEF_root"),
+        ("DEF_spine", (0, 0, 1.05), (0, 0, 1.30), "DEF_pelvis"),
+        ("DEF_chest", (0, 0, 1.30), (0, 0, 1.55), "DEF_spine"),
+        ("DEF_neck", (0, 0, 1.55), (0, 0, 1.65), "DEF_chest"),
+        ("DEF_head", (0, 0, 1.65), (0, 0.05, 1.90), "DEF_neck"),
+        ("DEF_upperarm.L", (-0.20, 0, 1.50), (-0.20, 0, 1.20), "DEF_chest"),
+        ("DEF_forearm.L", (-0.20, 0, 1.20), (-0.20, 0, 0.90), "DEF_upperarm.L"),
+        ("DEF_hand.L", (-0.20, 0, 0.90), (-0.20, 0, 0.70), "DEF_forearm.L"),
+        ("DEF_finger.L", (-0.20, 0, 0.70), (-0.20, 0.02, 0.55), "DEF_hand.L"),
+        ("DEF_thigh.L", (-0.10, 0, 0.90), (-0.10, 0, 0.50), "DEF_pelvis"),
+        ("DEF_shin.L", (-0.10, 0, 0.50), (-0.10, 0, 0.12), "DEF_thigh.L"),
+        ("DEF_foot.L", (-0.10, 0, 0.12), (-0.10, 0.20, 0.08), "DEF_shin.L"),
+        ("DEF_toe.L", (-0.10, 0.20, 0.08), (-0.10, 0.30, 0.08), "DEF_foot.L"),
+    ]
+    nomi_def = [n for (n, _h, _t, _p) in def_bones]
+
+    arm_obj, arm_data = _new_armature("RigScoreNoFalseFail")
+    bpy.ops.object.mode_set(mode='EDIT')
+    for (nome, testa, coda, genitore) in def_bones:
+        eb = _add_bone(arm_data, nome, testa, coda, genitore)
+        eb.use_deform = True
+    # Bone meccanici: ORG_/MCH_ non deformano e restano senza figli (foglia).
+    eb_org = _add_bone(arm_data, "ORG_spine", (0.35, 0, 1.05), (0.35, 0, 1.30), "DEF_root")
+    eb_org.use_deform = False
+    eb_mch = _add_bone(arm_data, "MCH_arm.L", (0.45, 0, 1.50), (0.45, 0, 1.20), "DEF_root")
+    eb_mch.use_deform = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Controller generati dai DEF: nasce la collection CTRLS, i DEF restano fuori.
+    _seleziona_def(arm_obj, nomi_def)
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione controller fallita: {res}"
+
+    # Custom shape su ogni controller (check 2.1 sano).
+    bpy.ops.mesh.primitive_cube_add(size=0.08, location=(0.0, 0.0, 1.0))
+    shape_obj = bpy.context.active_object
+    shape_obj.name = "ShapeCtrlScore"
+    bpy.context.view_layer.objects.active = arm_obj
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    registry = mod._read_registry(arm_obj)
+    for ctrl_name in registry:
+        pbone = arm_obj.pose.bones.get(ctrl_name)
+        if pbone is not None:
+            pbone.custom_shape = shape_obj
+
+    # Catena IK con pole: il pole e' referenziato solo da pole_subtarget.
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("upperarm.L", "forearm.L", "thigh.L", "shin.L"), True)
+    bpy.context.view_layer.update()
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito: {res_ik}"
+
+    # LIMIT_ROTATION sui controller di dita/piede, non sui bone DEF.
+    for ctrl_name in ("finger.L", "toe.L"):
+        pbone = arm_obj.pose.bones.get(ctrl_name)
+        assert pbone is not None, f"Controller {ctrl_name} assente dopo generate"
+        pbone.constraints.new('LIMIT_ROTATION')
+
+    # Driver sulla influence IK (check 2.2/2.6/4.1 sani).
+    fcurve = arm_obj.driver_add(
+        'pose.bones["upperarm.L"].constraints["CTRL_DEF_IK"].influence')
+    fcurve.driver.expression = "1 - 0.5"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Bone collection per i meccanici: nessuna collection vuota (check 5.1).
+    for coll_name, bone_name in (("MCH", "MCH_arm.L"), ("ORG", "ORG_spine")):
+        coll = arm_data.collections.get(coll_name)
+        if coll is None:
+            coll = arm_data.collections.new(coll_name)
+        coll.assign(arm_data.bones[bone_name])
+
+    # Mesh pesata: ogni DEF ha il suo vertex group, i pesi sommano 1.
+    bpy.ops.mesh.primitive_cube_add(size=1.2, location=(0.0, 0.0, 1.0))
+    mesh_obj = bpy.context.active_object
+    mesh_obj.name = "BodyMeshScore"
+    modificatore = mesh_obj.modifiers.new("Armature", 'ARMATURE')
+    modificatore.object = arm_obj
+    for nome in nomi_def:
+        mesh_obj.vertex_groups.new(name=nome)
+    mesh_obj.vertex_groups["DEF_spine"].add(
+        list(range(len(mesh_obj.data.vertices))), 1.0, 'REPLACE')
+
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+
+    res_score = bpy.ops.ctrl_def.rig_score()
+    assert res_score == {'FINISHED'}, f"rig_score non FINISHED: {res_score}"
+    report = arm_obj.get("_ctrl_def_last_rig_score")
+    assert report, "rig_score non ha memorizzato il report sull'armatura"
+
+    def dettaglio_codice(codice):
+        trovato = re.search(
+            r"%s\s+(OK|FAIL|NON TROVATO)\s*(?:<([^>]*)>)?" % re.escape(codice),
+            report)
+        assert trovato is not None, f"Check {codice} assente dal report: {report!r}"
+        return trovato.group(1), (trovato.group(2) or "")
+
+    # 1.5: i bone meccanici e i pole IK non sono "morti" su un rig corretto.
+    stato_15, det_15 = dettaglio_codice("1.5")
+    for nome in ("ORG_spine", "MCH_arm.L", "IK_forearm.L_pole"):
+        assert nome not in det_15, \
+            f"Check 1.5 segnala come morto il bone sano {nome}: {stato_15} <{det_15}>"
+
+    # 5.1: i DEF appena generati senza collection non vanno penalizzati.
+    stato_51, det_51 = dettaglio_codice("5.1")
+    assert "DEF_" not in det_51, \
+        f"Check 5.1 penalizza i DEF senza collection: {stato_51} <{det_51}>"
+
+    # 5.2: i LIMIT non sono pretesi sui bone DEF di dita/piedi.
+    stato_52, det_52 = dettaglio_codice("5.2")
+    for nome in ("DEF_finger.L", "DEF_toe.L"):
+        assert nome not in det_52, \
+            f"Check 5.2 pretende un LIMIT sul bone deformante {nome}: {stato_52} <{det_52}>"
+
+    # Il punteggio non deve calare per questi falsi positivi.
+    voto = re.search(r"(\d+)\s*/\s*30", report)
+    assert voto is not None, f"Voto /30 assente nel report: {report!r}"
+    assert int(voto.group(1)) >= 26, \
+        f"Punteggio troppo basso per un rig corretto: {voto.group(1)}/30 <- {report!r}"
+
+
+def test_remap_animazione():
+    # M2: Remap animazione tra due rig usando la mappa DEF->CTRL.
+    # L'operatore ctrl_def.remap non esiste ancora: il test e' Red.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+
+    # Rig sorgente: controller senza prefisso (arm.L, forearm.L, hand.L)
+    src_obj, src_data = _new_armature("RigRemapSrc")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(src_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(src_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione sorgente fallita: {res}"
+
+    # Rig destinazione: stesso schema DEF, controller con prefisso CTRL_
+    # (CTRL_arm.L, CTRL_forearm.L, CTRL_hand.L) -> nomi controller diversi
+    stg.prefix_ctrl = "CTRL_"
+    dst_obj, dst_data = _new_armature("RigRemapDst")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(dst_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(dst_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione destinazione fallita: {res}"
+    stg.prefix_ctrl = ""
+
+    # Registra la mappa: i controller sono gia' registrati da generate
+    # (registry _ctrl_def_generated su ciascuna armatura).
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il remap"
+
+    # Posa sul rig sorgente: ruota il controller radice di 30 gradi.
+    mod._ensure_armature_mode(bpy.context, src_obj, 'POSE')
+    bpy.context.view_layer.update()
+    pb_src = src_obj.pose.bones["arm.L"]
+    pb_src.rotation_mode = 'XYZ'
+    pb_src.rotation_euler = (0.0, 0.0, math.radians(30.0))
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    src_eval = src_obj.evaluated_get(dg)
+    matrici_src = {}
+    for nm in ("arm.L", "forearm.L", "hand.L"):
+        matrici_src[nm] = src_eval.pose.bones[nm].matrix.copy()
+
+    # Remap: trasferisce la posa dal rig sorgente al rig destinazione.
+    bpy.context.view_layer.objects.active = dst_obj
+    dst_obj.select_set(True)
+    src_obj.select_set(True)
+    res_remap = bpy.ops.ctrl_def.remap(source_armature=src_obj.name,
+                                       target_armature=dst_obj.name)
+    assert res_remap == {'FINISHED'}, f"remap fallito: {res_remap}"
+
+    # Verifica: la posa del rig destinazione corrisponde alla sorgente.
+    mod._ensure_armature_mode(bpy.context, dst_obj, 'POSE')
+    bpy.context.view_layer.update()
+    dg2 = bpy.context.evaluated_depsgraph_get()
+    dg2.update()
+    dst_eval = dst_obj.evaluated_get(dg2)
+    coppie = (("arm.L", "CTRL_arm.L"),
+              ("forearm.L", "CTRL_forearm.L"),
+              ("hand.L", "CTRL_hand.L"))
+    for nome_src, nome_dst in coppie:
+        mat_dst = dst_eval.pose.bones[nome_dst].matrix.copy()
+        mat_s = matrici_src[nome_src]
+        err = max(abs(mat_s[r][c] - mat_dst[r][c])
+                 for r in range(4) for c in range(4))
+        assert err < 1e-3, \
+            f"Posa non remappata su {nome_dst}: errore {err:.6f}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_manifest_diff():
+    # M3 (v0.5.0): Manifest+Diff. Gli operatori ctrl_def.manifest e
+    # ctrl_def.manifest_diff non esistono ancora: il test e' Red.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigManifest")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    cartella = tempfile.mkdtemp(prefix="ctrl_def_manifest_")
+    percorso_a = os.path.join(cartella, "manifest_a.json")
+    percorso_b = os.path.join(cartella, "manifest_b.json")
+
+    # Snapshot iniziale della struttura del rig generato.
+    res_manifest_a = bpy.ops.ctrl_def.manifest(filepath=percorso_a)
+    assert res_manifest_a == {'FINISHED'}, \
+        f"manifest (snapshot A) fallito: {res_manifest_a}"
+    assert os.path.isfile(percorso_a), f"Snapshot A non creato: {percorso_a}"
+
+    # Modifica strutturale: aggiunta di un controller registrato.
+    bpy.ops.object.mode_set(mode='EDIT')
+    fantasma = arm_data.edit_bones.new("extra.L")
+    fantasma.head = Vector((0.0, 0.0, 3.0))
+    fantasma.tail = Vector((0.0, 0.0, 3.2))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mod._mark_generated(arm_obj, "extra.L", "DEF_extra.L")
+    assert "extra.L" in mod._read_registry(arm_obj), \
+        "Il controller aggiunto non e' finito nel registry"
+
+    # Diff: deve segnalare l'aggiunta.
+    res_diff_add = bpy.ops.ctrl_def.manifest_diff(filepath=percorso_b,
+                                                  baseline=percorso_a)
+    assert res_diff_add == {'FINISHED'}, \
+        f"manifest_diff (aggiunta) fallito: {res_diff_add}"
+    diff_add = None
+    for chiave in ("_ctrl_def_last_manifest_diff", "_ctrl_def_manifest_diff",
+                   "ctrl_def_manifest_diff", "_ctrl_def_last_diff"):
+        valore = arm_obj.get(chiave)
+        if valore is not None:
+            diff_add = valore
+            break
+    assert diff_add is not None, "manifest_diff non ha memorizzato alcun diff"
+    testo_diff = diff_add if isinstance(diff_add, str) else json.dumps(diff_add)
+    assert ("extra.L" in testo_diff
+            or "added" in testo_diff.lower()
+            or "aggiunt" in testo_diff.lower()), \
+        f"Il diff non segnala l'aggiunta del controller: {testo_diff!r}"
+
+    # Due snapshot identici (senza modifiche strutturali) -> diff vuoto.
+    # Un cambio di posa tra i due snapshot non deve produrre drift, perche'
+    # lo snapshot e' strutturale (non valori di posa).
+    percorso_c = os.path.join(cartella, "manifest_c.json")
+    percorso_d = os.path.join(cartella, "manifest_d.json")
+    res_manifest_c = bpy.ops.ctrl_def.manifest(filepath=percorso_c)
+    assert res_manifest_c == {'FINISHED'}, \
+        f"manifest (snapshot C) fallito: {res_manifest_c}"
+    bpy.ops.object.mode_set(mode='POSE')
+    pb_ctrl = arm_obj.pose.bones.get("arm.L")
+    if pb_ctrl is not None:
+        pb_ctrl.rotation_mode = 'XYZ'
+        pb_ctrl.rotation_euler = (0.0, 0.0, math.radians(15.0))
+    bpy.context.view_layer.update()
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res_manifest_d = bpy.ops.ctrl_def.manifest(filepath=percorso_d)
+    assert res_manifest_d == {'FINISHED'}, \
+        f"manifest (snapshot D) fallito: {res_manifest_d}"
+    res_diff_empty = bpy.ops.ctrl_def.manifest_diff(filepath=percorso_d,
+                                                   baseline=percorso_c)
+    assert res_diff_empty == {'FINISHED'}, \
+        f"manifest_diff (identici) fallito: {res_diff_empty}"
+    diff_empty = None
+    for chiave in ("_ctrl_def_last_manifest_diff", "_ctrl_def_manifest_diff",
+                   "ctrl_def_manifest_diff", "_ctrl_def_last_diff"):
+        valore = arm_obj.get(chiave)
+        if valore is not None:
+            diff_empty = valore
+            break
+    if diff_empty is not None:
+        testo_empty = diff_empty if isinstance(diff_empty, str) else json.dumps(diff_empty)
+        assert testo_empty.strip() in ("", "{}", "[]", "null", "None"), \
+            f"Due snapshot identici hanno prodotto drift: {testo_empty!r}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_manifest_diff_edge_cases():
+    """Casi limite di ctrl_def.manifest_diff (bug di _esperimenti/report_test_funzionali.md).
+
+    Caso 1: filepath == baseline. Se il file viene scritto prima di leggere la
+    baseline il diff e' sempre vuoto: si accetta un diff non vuoto (drift
+    segnalato) oppure un rifiuto esplicito con CANCELLED.
+    Caso 2: baseline inesistente. Deve rientrare CANCELLED senza eccezione e
+    senza lasciare il file di output scritto a meta.
+    """
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigManifestEdge")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per manifest_diff"
+
+    cartella = tempfile.mkdtemp(prefix="ctrl_def_manifest_edge_")
+    percorso_a = os.path.join(cartella, "manifest_a.json")
+
+    # Snapshot di partenza: baseline valida su disco.
+    res_a = bpy.ops.ctrl_def.manifest(filepath=percorso_a)
+    assert res_a == {'FINISHED'}, f"manifest (snapshot A) fallito: {res_a}"
+    assert os.path.isfile(percorso_a), f"Snapshot A non creato: {percorso_a}"
+
+    # Drift strutturale: controller aggiunto e registrato (stessa modifica
+    # del test principale, cosi' il diff atteso non e' vuoto).
+    bpy.ops.object.mode_set(mode='EDIT')
+    fantasma = arm_data.edit_bones.new("edge_extra.L")
+    fantasma.head = Vector((0.0, 0.0, 4.0))
+    fantasma.tail = Vector((0.0, 0.0, 4.2))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mod._mark_generated(arm_obj, "edge_extra.L", "DEF_edge_extra.L")
+    assert "edge_extra.L" in mod._read_registry(arm_obj), \
+        "Il controller aggiunto non e' finito nel registry"
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+
+    # Caso 1: filepath e baseline sono lo stesso file.
+    eccezione_stesso = None
+    res_stesso = None
+    try:
+        res_stesso = bpy.ops.ctrl_def.manifest_diff(filepath=percorso_a,
+                                                    baseline=percorso_a)
+    except RuntimeError as exc:
+        eccezione_stesso = exc
+    assert eccezione_stesso is None, \
+        f"manifest_diff (filepath == baseline) ha sollevato RuntimeError: {eccezione_stesso}"
+    assert res_stesso in ({'FINISHED'}, {'CANCELLED'}), \
+        f"manifest_diff (filepath == baseline) con esito inatteso: {res_stesso}"
+
+    if res_stesso == {'CANCELLED'}:
+        # Rifiuto esplicito ammesso, ma il file di baseline non deve restare
+        # troncato a meta: deve essere ancora JSON valido e leggibile.
+        try:
+            with open(percorso_a, "r", encoding="utf-8") as f:
+                json.load(f)
+        except (OSError, ValueError) as exc:
+            raise AssertionError(
+                "manifest_diff (filepath == baseline) ha lasciato la baseline "
+                f"illeggibile dopo il rifiuto: {exc}"
+            )
+    else:
+        diff_stesso = None
+        for chiave in ("_ctrl_def_last_manifest_diff", "_ctrl_def_manifest_diff",
+                       "ctrl_def_manifest_diff", "_ctrl_def_last_diff"):
+            valore = arm_obj.get(chiave)
+            if valore is not None:
+                diff_stesso = valore
+                break
+        assert diff_stesso is not None, \
+            "manifest_diff (filepath == baseline) non ha memorizzato alcun diff"
+        testo_stesso = diff_stesso if isinstance(diff_stesso, str) else json.dumps(diff_stesso)
+        assert testo_stesso.strip() not in ("", "{}", "[]", "null", "None"), \
+            ("Il drift strutturale non e' segnalato quando filepath == baseline: "
+             f"diff={testo_stesso!r}")
+
+    # Caso 2: baseline inesistente. Deve essere un CANCELLED pulito, non
+    # un'eccezione, e non deve lasciare il file di output scritto a meta.
+    percorso_inesistente = os.path.join(cartella, "baseline_assente.json")
+    assert not os.path.isfile(percorso_inesistente), \
+        f"La baseline di prova esiste gia': {percorso_inesistente}"
+    percorso_out = os.path.join(cartella, "manifest_out.json")
+    assert not os.path.isfile(percorso_out), f"Il file di output esiste gia': {percorso_out}"
+
+    eccezione_mancante = None
+    res_mancante = None
+    try:
+        res_mancante = bpy.ops.ctrl_def.manifest_diff(filepath=percorso_out,
+                                                      baseline=percorso_inesistente)
+    except RuntimeError as exc:
+        eccezione_mancante = exc
+    assert eccezione_mancante is None, \
+        ("Baseline mancante: eccezione invece di CANCELLED "
+         f"({eccezione_mancante})")
+    assert res_mancante == {'CANCELLED'}, \
+        f"Baseline mancante: atteso CANCELLED, ottenuto {res_mancante}"
+    assert not os.path.isfile(percorso_out), \
+        ("Baseline mancante: il file di output e' stato scritto a meta "
+         f"({percorso_out}) nonostante il CANCELLED")
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_naming_doctor_safe_rename():
+    # M6 (v0.5.0): Naming Doctor Safe Rename. L'operatore/funzione
+    # ctrl_def.naming_doctor non esiste ancora: il test e' Red.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.ik_create_pole = True
+    stg.ik_chain_length = 3
+    arm_obj, arm_data = _new_armature("RigNamingDoctor")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione fallita: {res}"
+
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il naming doctor"
+
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    stg.ik_chain_length = 3
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito: {res_ik}"
+    assert arm_data.bones.get("IK_hand.L") is not None, "Target IK_hand.L non creato"
+    assert arm_data.bones.get("IK_hand.L_pole") is not None, "Pole IK_hand.L_pole non creato"
+
+    forma = bpy.data.objects.new("WidgetNamingDoctor", bpy.data.meshes.new("WidgetNamingDoctor"))
+    bpy.context.scene.collection.objects.link(forma)
+    arm_obj.pose.bones["arm.L"].custom_shape = forma
+
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+
+    rename_map = {
+        "arm.L": "arm_ctrl.L",
+        "DEF_arm.L": "DEF_arm_new.L",
+        "IK_hand.L": "IK_hand_ctrl.L",
+        "IK_hand.L_pole": "IK_hand_pole_ctrl.L",
+    }
+    res_nd = mod.naming_doctor(arm_obj, rename_map)
+    assert res_nd == {'FINISHED'}, f"naming_doctor fallito: {res_nd}"
+
+    reg = mod._read_registry(arm_obj)
+    assert "arm_ctrl.L" in reg, f"Registry senza 'arm_ctrl.L': {reg}"
+    assert reg["arm_ctrl.L"].get("def") == "DEF_arm_new.L", \
+        f"Registry def non aggiornato: {reg}"
+    assert "arm.L" not in reg, f"Vecchia chiave 'arm.L' ancora nel registry: {reg}"
+
+    assert "arm_ctrl.L" in arm_data.bones, "Controller rinominato assente"
+    assert "DEF_arm_new.L" in arm_data.bones, "DEF rinominato assente"
+    assert "IK_hand_ctrl.L" in arm_data.bones, "Target IK rinominato assente"
+    assert "IK_hand_pole_ctrl.L" in arm_data.bones, "Pole IK rinominato assente"
+    for vecchio in ("arm.L", "DEF_arm.L", "IK_hand.L", "IK_hand.L_pole"):
+        assert vecchio not in arm_data.bones, \
+            f"Vecchio nome ancora presente dopo la rinomina: {vecchio}"
+
+    pb_ctrl = arm_obj.pose.bones["arm_ctrl.L"]
+    assert pb_ctrl.custom_shape is not None, "custom_shape perso dopo la rinomina"
+    assert pb_ctrl.custom_shape == forma, "custom_shape non punta piu' allo stesso oggetto"
+
+    con_ik = None
+    for pb in arm_obj.pose.bones:
+        for con in pb.constraints:
+            if getattr(con, "subtarget", "") in ("IK_hand_ctrl.L", "IK_hand.L"):
+                con_ik = con
+    assert con_ik is not None, "Constraint IK non trovato dopo la rinomina"
+    assert con_ik.subtarget == "IK_hand_ctrl.L", \
+        f"subtarget IK non aggiornato: {con_ik.subtarget!r}"
+    if getattr(con_ik, "pole_subtarget", None) is not None:
+        assert con_ik.pole_subtarget == "IK_hand_pole_ctrl.L", \
+            f"pole_subtarget IK non aggiornato: {con_ik.pole_subtarget!r}"
+
+    for bone in arm_data.bones:
+        parent = bone.parent
+        if parent is not None:
+            assert parent.name not in ("arm.L", "DEF_arm.L", "IK_hand.L",
+                                       "IK_hand.L_pole"), \
+                f"Parent stale su {bone.name}: {parent.name}"
+
+    assert "forearm.L" in arm_data.bones, "forearm.L assente prima del test di conflitto"
+    assert "hand.L" in arm_data.bones, "hand.L assente prima del test di conflitto"
+    try:
+        res_conflict = mod.naming_doctor(arm_obj, {"forearm.L": "hand.L"})
+    except Exception:
+        res_conflict = {'CANCELLED'}
+    assert res_conflict in ({'CANCELLED'}, False, None), \
+        f"Conflitto non rifiutato: {res_conflict!r}"
+    assert "forearm.L" in arm_data.bones, "forearm.L sovrascritto/rimosso dal conflitto"
+    assert "hand.L" in arm_data.bones, "hand.L alterato dal conflitto"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_character_picker_auto():
+    # M7 (v0.5.0): Character Picker auto. La funzione di modulo
+    # ctrl_def.character_picker non esiste ancora: il test e' Red.
+    # Contratto atteso: character_picker(arm_obj) rientra {'FINISHED'} e
+    # pubblica il mapping gruppo -> bone nelle Bone Collection dell'armatura,
+    # con i gruppi Root / Spine / Braccia / Gambe / Faccia / IK / Pole.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.ik_create_pole = True
+    stg.ik_chain_length = 3
+    arm_obj, arm_data = _new_armature("RigCharacterPicker")
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    # Scheletro DEF completo: root, spine, braccia, gambe e faccia.
+    _add_bone(arm_data, "DEF_root", (0.0, 0.0, 0.0), (0.0, 0.0, 0.2))
+    _add_bone(arm_data, "DEF_spine", (0.0, 0.0, 0.9), (0.0, 0.0, 1.2), "DEF_root")
+    _add_bone(arm_data, "DEF_chest", (0.0, 0.0, 1.2), (0.0, 0.0, 1.5), "DEF_spine")
+    _add_bone(arm_data, "DEF_neck", (0.0, 0.0, 1.5), (0.0, 0.0, 1.65), "DEF_chest")
+    _add_bone(arm_data, "DEF_head", (0.0, 0.0, 1.65), (0.0, 0.0, 1.85), "DEF_neck")
+    for lato, segno in (("L", 1.0), ("R", -1.0)):
+        _add_bone(arm_data, "DEF_arm." + lato,
+                  (segno * 0.2, 0.0, 1.5), (segno * 0.5, 0.0, 1.5), "DEF_chest")
+        _add_bone(arm_data, "DEF_forearm." + lato,
+                  (segno * 0.5, 0.0, 1.5), (segno * 0.8, 0.0, 1.5), "DEF_arm." + lato)
+        _add_bone(arm_data, "DEF_hand." + lato,
+                  (segno * 0.8, 0.0, 1.5), (segno * 0.95, 0.0, 1.5), "DEF_forearm." + lato)
+        _add_bone(arm_data, "DEF_thigh." + lato,
+                  (segno * 0.15, 0.0, 0.9), (segno * 0.15, 0.0, 0.5), "DEF_root")
+        _add_bone(arm_data, "DEF_shin." + lato,
+                  (segno * 0.15, 0.0, 0.5), (segno * 0.15, 0.0, 0.1), "DEF_thigh." + lato)
+        _add_bone(arm_data, "DEF_foot." + lato,
+                  (segno * 0.15, 0.0, 0.1), (segno * 0.15, 0.0, 0.02), "DEF_shin." + lato)
+    _add_bone(arm_data, "DEF_jaw", (0.0, 0.1, 1.7), (0.0, 0.2, 1.6), "DEF_head")
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    nomi_def = [b.name for b in arm_data.bones if b.name.startswith("DEF_")]
+    _seleziona_def(arm_obj, nomi_def)
+    res_gen = bpy.ops.ctrl_def.generate()
+    assert res_gen == {'FINISHED'}, f"Generazione scheletro fallita: {res_gen}"
+
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il character picker"
+
+    # Catene IK con pole: braccia e gambe, entrambi i lati.
+    catene = (("arm.L", "forearm.L", "hand.L"),
+              ("arm.R", "forearm.R", "hand.R"),
+              ("thigh.L", "shin.L", "foot.L"),
+              ("thigh.R", "shin.R", "foot.R"))
+    for catena in catene:
+        mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+        _seleziona_posa(arm_obj, None, False)
+        _seleziona_posa(arm_obj, catena, True)
+        res_ik = bpy.ops.ctrl_def.add_ik()
+        assert res_ik == {'FINISHED'}, f"add_ik fallito su {catena}: {res_ik}"
+    for target in ("IK_hand.L", "IK_hand.R", "IK_foot.L", "IK_foot.R"):
+        assert arm_data.bones.get(target) is not None, f"Target {target} non creato"
+        assert arm_data.bones.get(target + "_pole") is not None, \
+            f"Pole {target}_pole non creato"
+
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+    assert hasattr(mod, "character_picker"), \
+        "M7: funzione di modulo ctrl_def.character_picker assente"
+
+    res = mod.character_picker(arm_obj)
+    assert res == {'FINISHED'}, f"character_picker fallito: {res}"
+
+    # Mapping gruppo -> bone pubblicato sulle Bone Collection dell'armatura.
+    gruppi = {}
+    for coll in arm_data.collections:
+        gruppi[coll.name] = {b.name for b in arm_data.bones
+                             if coll.name in (c.name for c in b.collections)}
+
+    richiesti = ("Root", "Spine", "Braccia", "Gambe", "Faccia", "IK", "Pole")
+    mancanti = [g for g in richiesti if g not in gruppi]
+    assert not mancanti, \
+        f"Gruppi mancanti: {mancanti} (trovati: {sorted(gruppi)})"
+    for nome_gruppo in richiesti:
+        assert gruppi[nome_gruppo], f"Gruppo {nome_gruppo} vuoto"
+
+    assert "root" in gruppi["Root"], f"root assente da Root: {gruppi['Root']}"
+    assert {"spine", "chest"} <= gruppi["Spine"], \
+        f"Catena spine incompleta: {gruppi['Spine']}"
+    assert {"arm.L", "forearm.L", "hand.L",
+            "arm.R", "forearm.R", "hand.R"} <= gruppi["Braccia"], \
+        f"Braccia incomplete: {gruppi['Braccia']}"
+    assert {"thigh.L", "shin.L", "foot.L",
+            "thigh.R", "shin.R", "foot.R"} <= gruppi["Gambe"], \
+        f"Gambe incomplete: {gruppi['Gambe']}"
+    assert "jaw" in gruppi["Faccia"], f"Faccia senza jaw: {gruppi['Faccia']}"
+    assert {"IK_hand.L", "IK_hand.R", "IK_foot.L", "IK_foot.R"} <= gruppi["IK"], \
+        f"Target IK mancanti dal gruppo IK: {gruppi['IK']}"
+    assert {"IK_hand.L_pole", "IK_hand.R_pole",
+            "IK_foot.L_pole", "IK_foot.R_pole"} <= gruppi["Pole"], \
+        f"Pole mancanti dal gruppo Pole: {gruppi['Pole']}"
+
+    # Mirror: ogni controller .L/.R finisce nello stesso gruppo della controparte.
+    for nome_gruppo in ("Braccia", "Gambe", "IK", "Pole"):
+        for nome in sorted(gruppi[nome_gruppo]):
+            if nome.endswith(".L"):
+                specchio = nome[:-2] + ".R"
+            elif nome.endswith(".R"):
+                specchio = nome[:-2] + ".L"
+            else:
+                continue
+            assert specchio in gruppi[nome_gruppo], \
+                f"Mirror rotto in {nome_gruppo}: {nome} senza {specchio}"
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def test_character_picker_keywords_it():
+    # Difetto 4 del report test funzionali: il character picker classifica solo
+    # con keyword inglesi e riconosce i target IK solo col prefisso "IK_".
+    # Contratto atteso: le keyword italiane (braccio, gamba, mano, testa)
+    # portano ai distretti giusti, "head" sta in Faccia, un target con
+    # suffisso "_ik" finisce in IK (non in Gambe) e il suo pole in Pole.
+    _reset()
+    arm_obj, arm_data = _new_armature("RigCharacterPickerKeywordsIT")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "braccio.L", (0.5, 0.0, 1.4), (0.8, 0.0, 1.4))
+    _add_bone(arm_data, "gamba.R", (-0.15, 0.0, 0.9), (-0.15, 0.0, 0.5))
+    _add_bone(arm_data, "testa", (0.0, 0.0, 1.65), (0.0, 0.0, 1.85))
+    _add_bone(arm_data, "mano.L", (0.8, 0.0, 1.4), (0.95, 0.0, 1.4))
+    _add_bone(arm_data, "head", (0.0, 0.0, 1.85), (0.0, 0.0, 2.05))
+    _add_bone(arm_data, "foot_ik.L", (0.15, 0.2, 0.05), (0.15, 0.35, 0.05))
+    _add_bone(arm_data, "foot_ik.L_pole", (0.15, 0.2, 0.4), (0.15, 0.35, 0.4))
+    # Nomi con separatore punto e keyword italiane dei rig avanzati: il
+    # tokenizzatore deve spezzare anche "." e "radice" vale come "root".
+    _add_bone(arm_data, "coscia.01.L", (0.15, 0.0, 0.9), (0.15, 0.0, 0.5))
+    _add_bone(arm_data, "spine.002", (0.0, 0.0, 1.2), (0.0, 0.0, 1.4))
+    _add_bone(arm_data, "collo", (0.0, 0.0, 1.55), (0.0, 0.0, 1.65))
+    _add_bone(arm_data, "dito.01.R", (-0.8, 0.0, 1.4), (-0.9, 0.0, 1.4))
+    _add_bone(arm_data, "radice", (0.0, 0.0, 0.0), (0.0, 0.0, 0.2))
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il character picker"
+    assert hasattr(mod, "character_picker"), \
+        "M7: funzione di modulo ctrl_def.character_picker assente"
+
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+    res = mod.character_picker(arm_obj)
+    assert res == {'FINISHED'}, f"character_picker fallito: {res}"
+
+    def gruppi_di(nome):
+        bone = arm_data.bones.get(nome)
+        assert bone is not None, f"Bone di prova assente: {nome}"
+        return {c.name for c in bone.collections}
+
+    attesi = {
+        "braccio.L": "Braccia",
+        "gamba.R": "Gambe",
+        "testa": "Faccia",
+        "mano.L": "Braccia",
+        "head": "Faccia",
+        "foot_ik.L": "IK",
+        "foot_ik.L_pole": "Pole",
+        "coscia.01.L": "Gambe",
+        "spine.002": "Spine",
+        "collo": "Spine",
+        "dito.01.R": "Braccia",
+        "radice": "Root",
+    }
+    for nome, gruppo in attesi.items():
+        gruppi = gruppi_di(nome)
+        assert gruppo in gruppi, \
+            f"{nome} non finito in {gruppo}: gruppi trovati {sorted(gruppi)}"
+
+    # I distretti specifici non devono ricadere nel fallback della colonna.
+    for nome in ("braccio.L", "mano.L", "head"):
+        assert "Spine" not in gruppi_di(nome), \
+            f"{nome} lasciato in Spine: {sorted(gruppi_di(nome))}"
+    for nome in ("foot_ik.L",):
+        assert "Gambe" not in gruppi_di(nome), \
+            f"{nome} lasciato in Gambe: {sorted(gruppi_di(nome))}"
+
+    # Idempotenza: secondo richiamo senza duplicati ne' assegnazioni cambiate.
+    coll_prima = sorted(c.name for c in arm_data.collections)
+    prima = {nome: gruppi_di(nome) for nome in attesi}
+    res2 = mod.character_picker(arm_obj)
+    assert res2 == {'FINISHED'}, f"Secondo character_picker fallito: {res2}"
+    coll_dopo = sorted(c.name for c in arm_data.collections)
+    assert coll_dopo == coll_prima, \
+        f"Collection duplicate al secondo richiamo: {coll_prima} -> {coll_dopo}"
+    for nome in attesi:
+        assert gruppi_di(nome) == prima[nome], \
+            f"Assegnazione cambiata al secondo richiamo per {nome}: " \
+            f"{sorted(prima[nome])} -> {sorted(gruppi_di(nome))}"
+
+
+def test_i18n_complete():
+    """Ogni chiave letterale passata a tr("...") deve esistere in IT ed EN.
+
+    Scansiona i sorgenti del package: se una chiave usata nel codice manca da
+    _I18N[lingua], tr() restituisce la chiave grezza in UI. Il test elenca le
+    mancanze per lingua e fallisce finche' restano.
+    """
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il test i18n"
+    assert hasattr(mod, "_I18N"), "Struttura _I18N non esposta dal modulo i18n"
+    diz_it = mod._I18N["it"]
+    diz_en = mod._I18N["en"]
+
+    cartella_pkg = os.path.join(_REPO_ROOT, "ctrl_def_mods")
+    sorgenti = [os.path.join(_REPO_ROOT, "__init__.py")]
+    sorgenti += sorted(
+        os.path.join(cartella_pkg, nome)
+        for nome in os.listdir(cartella_pkg)
+        if nome.endswith(".py"))
+    assert sorgenti, f"Nessun sorgente .py trovato in {cartella_pkg}"
+
+    # Solo chiavi letterali: tr("panel.ik") va controllata, tr(variabile) no.
+    schema_tr = re.compile(r"""\btr\(\s*(["'])([A-Za-z0-9_.\-]+)\1""")
+    chiavi_usate = set()
+    for percorso in sorgenti:
+        with open(percorso, "r", encoding="utf-8") as file_py:
+            testo = file_py.read()
+        for trovato in schema_tr.finditer(testo):
+            chiavi_usate.add(trovato.group(2))
+    assert chiavi_usate, "Nessuna chiamata tr(\"...\") trovata nei sorgenti del package"
+
+    mancanti_it = sorted(chiave for chiave in chiavi_usate if chiave not in diz_it)
+    mancanti_en = sorted(chiave for chiave in chiavi_usate if chiave not in diz_en)
+    print("I18N chiavi_usate=%d mancanti_it=%d mancanti_en=%d" % (
+        len(chiavi_usate), len(mancanti_it), len(mancanti_en)))
+    print("I18N mancanti IT:", mancanti_it)
+    print("I18N mancanti EN:", mancanti_en)
+
+    assert not mancanti_it, \
+        ("%d chiavi usate con tr() assenti dal dizionario IT: %r" % (
+            len(mancanti_it), mancanti_it))
+    assert not mancanti_en, \
+        ("%d chiavi usate con tr() assenti dal dizionario EN: %r" % (
+            len(mancanti_en), mancanti_en))
+
+
+def test_registry_hardening_and_batch():
+    """Registry robusto a JSON di forma sbagliata e scrittura batch O(N).
+
+    Un JSON valido ma non dizionario ("[]", "123", "null") o con valori non
+    dizionario faceva crashare .items()/.get() in generate e remove: la
+    lettura deve degradare a {} senza eccezioni. I due helper batch devono
+    iscrivere e rimuovere piu' voci con una sola lettura/scrittura del JSON.
+    """
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il registry"
+    for grezzo in ("[]", "123", "null", '{"a": 5}', "{bad"):
+        _reset()
+        stg = bpy.context.scene.ctrl_def_settings
+        stg.parent = "CHAIN"
+        stg.pipeline_mode = "DEF_CTRL"
+        stg.prefix_ctrl = ""
+        arm_obj, arm_data = _new_armature("RigRegistry")
+        bpy.ops.object.mode_set(mode='EDIT')
+        _build_chain(arm_data)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        arm_obj["_ctrl_def_generated"] = grezzo
+        assert mod._read_registry(arm_obj) == {}, \
+            f"Registry {grezzo!r} non degradato a {{}}: {mod._read_registry(arm_obj)}"
+
+        _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+        res = bpy.ops.ctrl_def.generate()
+        assert res == {'FINISHED'}, \
+            f"generate fallito con registry {grezzo!r}: {res}"
+        assert arm_obj.mode == 'OBJECT', \
+            f"generate ha lasciato l'armatura in {arm_obj.mode} con {grezzo!r}"
+        assert set(mod._read_registry(arm_obj)) == {"arm.L", "forearm.L", "hand.L"}, \
+            f"Registry non riscritto correttamente da generate con {grezzo!r}: " \
+            f"{mod._read_registry(arm_obj)}"
+
+        arm_obj["_ctrl_def_generated"] = grezzo
+        res_remove = bpy.ops.ctrl_def.remove()
+        assert res_remove == {'FINISHED'}, \
+            f"remove fallito con registry {grezzo!r}: {res_remove}"
+        assert arm_obj.mode == 'OBJECT', \
+            f"remove ha lasciato l'armatura in {arm_obj.mode} con {grezzo!r}"
+        assert mod._read_registry(arm_obj) == {}, \
+            f"Registry non pulito da remove con {grezzo!r}: {mod._read_registry(arm_obj)}"
+        # I DEF di partenza restano: remove tocca solo i controller registrati
+        assert "DEF_arm.L" in arm_data.bones, \
+            f"remove ha rimosso un DEF con registry {grezzo!r}"
+
+    # Helper batch: iscrizione multi-voce in un colpo solo
+    voci = {"x.L": {"def": "DEF_x.L"},
+            "y.L": {"def": "DEF_y.L", "role": "MCH"}}
+    mod._mark_generated_batch(arm_obj, voci)
+    assert mod._read_registry(arm_obj) == voci, \
+        f"_mark_generated_batch non ha scritto le voci attese: {mod._read_registry(arm_obj)}"
+    # Il JSON salvato e' davvero un dizionario serializzato
+    grezzo_su_disco = json.loads(arm_obj.get("_ctrl_def_generated", "{}"))
+    assert isinstance(grezzo_su_disco, dict) and set(grezzo_su_disco) == set(voci), \
+        f"JSON su disco inatteso dopo il batch: {grezzo_su_disco!r}"
+    # Nessuna voce: il registro resta invariato e nessuna eccezione
+    mod._mark_generated_batch(arm_obj, {})
+    assert mod._read_registry(arm_obj) == voci, \
+        "_mark_generated_batch con voci vuote ha alterato il registro"
+
+    # Helper batch: rimozione multi-voce, i nomi assenti non sollevano
+    mod._forget_generated_batch(arm_obj, ["x.L", "manca.L"])
+    assert mod._read_registry(arm_obj) == {"y.L": voci["y.L"]}, \
+        f"_forget_generated_batch ha lasciato voci inattese: {mod._read_registry(arm_obj)}"
+
+
+def test_operators_hardening_complex():
+    """Hardening operatori: collection vuote, check 1.1/5.1 e registry corrotto.
+
+    Su un rig DEF_CTRL (senza ORG_/MCH_) auto_collection non deve lasciare
+    collection MCH/ORG vuote, il check 1.1 non deve dare falso FAIL grazie al
+    registro controller e il check 5.1 deve passare. remove, con una proprieta'
+    registro corrotta, deve ripulirla a "{}" senza sollevare.
+    """
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.pipeline_mode = "DEF_CTRL"
+    stg.prefix_ctrl = ""
+    arm_obj, arm_data = _new_armature("RigHardening30")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"generate fallito sul rig DEF_CTRL: {res}"
+    bpy.context.view_layer.update()
+
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile"
+    import importlib
+    ops = importlib.import_module("ctrl_def_addon.ctrl_def_mods.ctrl_def_operators")
+    assert set(mod._read_registry(arm_obj)) == {"arm.L", "forearm.L", "hand.L"}, \
+        f"Registry inatteso dopo generate: {mod._read_registry(arm_obj)}"
+
+    res_ac = bpy.ops.ctrl_def.auto_collection()
+    assert res_ac == {'FINISHED'}, f"auto_collection fallito: {res_ac}"
+    bpy.context.view_layer.update()
+
+    # Nessuna collection gestita MCH/ORG deve restare vuota.
+    for cname in ("MCH", "ORG"):
+        coll = arm_data.collections.get(cname)
+        assert coll is None or len(list(coll.bones)) > 0, \
+            f"Collection {cname} vuota dopo auto_collection su rig DEF_CTRL"
+    for cname in ("CTRLS", "DEF"):
+        coll = arm_data.collections.get(cname)
+        assert coll is not None and len(list(coll.bones)) > 0, \
+            f"Collection {cname} mancante o vuota dopo auto_collection"
+
+    # Check 1.1: DEF_ + controller registrati bastano, niente falso FAIL.
+    ok11, msg11 = ops._rig_check_1_1(arm_obj, bpy.context)
+    assert ok11 == "OK", f"check 1.1 in falso FAIL su rig DEF_CTRL: {msg11}"
+    # Check 5.1: nessun bone fuori collection e nessuna collection vuota.
+    ok51, msg51 = ops._rig_check_5_1(arm_obj, bpy.context)
+    assert ok51 == "OK", f"check 5.1 fallito dopo auto_collection: {msg51}"
+
+    # Registry corrotto: remove ripulisce la proprieta' a "{}" e non solleva.
+    arm_obj["_ctrl_def_generated"] = "{bad"
+    assert mod._read_registry(arm_obj) == {}, \
+        "Il registry corrotto non e' stato degradato a {} in lettura"
+    res_rm = bpy.ops.ctrl_def.remove()
+    assert res_rm == {'FINISHED'}, f"remove fallito con registry corrotto: {res_rm}"
+    assert arm_obj.mode == 'OBJECT', \
+        f"remove ha lasciato l'armatura in {arm_obj.mode}"
+    assert arm_obj.get("_ctrl_def_generated") == "{}", \
+        f"Proprieta' registro non ripulita: {arm_obj.get('_ctrl_def_generated')!r}"
+    assert mod._read_registry(arm_obj) == {}, \
+        f"Registry non vuoto dopo remove: {mod._read_registry(arm_obj)}"
+
+
+def test_ui_and_depsgraph_optimization():
+    """Cache del registro, pulizia constraint prima di remove e draw della UI.
+
+    La cache deve evitare il json.loads a ogni redraw restituendo copie shallow,
+    invalidarsi quando il testo del registro cambia e su _write_registry.
+    remove deve togliere i constraint (COPY_TRANSFORMS/IK) prima di cancellare
+    i controller in Edit Mode: sono quelli che stampano i warning depsgraph
+    OperationKey(BONE_DONE). Il pannello deve disegnare tutte le sezioni.
+    """
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.pipeline_mode = "DEF_CTRL"
+    stg.prefix_ctrl = ""
+    arm_obj, arm_data = _new_armature("RigUICache")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile"
+    import importlib
+    import inspect
+    reg = importlib.import_module("ctrl_def_addon.ctrl_def_mods.ctrl_def_registry")
+    ops = importlib.import_module("ctrl_def_addon.ctrl_def_mods.ctrl_def_operators")
+
+    # --- 1. Micro-cache del registro -------------------------------------
+    assert isinstance(reg._REGISTRY_CACHE, dict), "_REGISTRY_CACHE mancante"
+    mod._mark_generated_batch(arm_obj, {"arm.L": {"def": "DEF_arm.L"}})
+    reg._REGISTRY_CACHE.pop(id(arm_obj), None)
+    primo = mod._read_registry(arm_obj)
+    voce = reg._REGISTRY_CACHE.get(id(arm_obj))
+    assert voce is not None, "_read_registry non popola la cache del registro"
+    assert voce["raw"] == arm_obj.get("_ctrl_def_generated"), \
+        f"La cache non conserva il testo grezzo: {voce.get('raw')!r}"
+    assert voce["data"] == primo == {"arm.L": {"def": "DEF_arm.L"}}, \
+        f"Cache con contenuto inatteso: {voce.get('data')!r}"
+    # Copia shallow: mutare il risultato non deve corrompere la cache
+    primo["sporca.L"] = {"def": "DEF_x.L"}
+    secondo = mod._read_registry(arm_obj)
+    assert "sporca.L" not in secondo, \
+        f"La cache non e' restituita in copia shallow: {secondo!r}"
+    assert set(secondo) == {"arm.L"}, f"Cache alterata dal chiamante: {secondo!r}"
+    # Copia per livello: mutare il sub-dict {"def": ...} non corrompe la cache
+    reg1 = mod._read_registry(arm_obj)
+    reg1["arm.L"]["def"] = "MUTATO"
+    assert mod._read_registry(arm_obj)["arm.L"]["def"] == "DEF_arm.L", \
+        f"La cache condivide i sub-dict col chiamante: {mod._read_registry(arm_obj)!r}"
+    # A parita' di testo il JSON non viene riprocessato
+    chiamate = {"n": 0}
+    vero_loads = reg.json.loads
+
+    def _conta_loads(testo):
+        chiamate["n"] += 1
+        return vero_loads(testo)
+
+    reg.json.loads = _conta_loads
+    try:
+        mod._read_registry(arm_obj)
+        mod._read_registry(arm_obj)
+    finally:
+        reg.json.loads = vero_loads
+    assert chiamate["n"] == 0, \
+        f"json.loads rieseguito {chiamate['n']} volte a cache calda"
+    # Testo diverso: la cache viene meno e il nuovo contenuto appare
+    arm_obj["_ctrl_def_generated"] = json.dumps({"altro.L": {"def": "DEF_altro.L"}})
+    assert set(mod._read_registry(arm_obj)) == {"altro.L"}, \
+        "La cache non si rinnova quando il testo del registro cambia"
+    # _write_registry invalida la voce
+    mod._write_registry(arm_obj, {"w.L": {"def": "DEF_w.L"}})
+    assert id(arm_obj) not in reg._REGISTRY_CACHE, \
+        "_write_registry non invalida la cache del registro"
+    assert set(mod._read_registry(arm_obj)) == {"w.L"}, \
+        f"Lettura dopo _write_registry incoerente: {mod._read_registry(arm_obj)!r}"
+
+    # --- 2. Ordine dei simboli del modulo operatori ----------------------
+    percorso_ops = os.path.join(_REPO_ROOT, "ctrl_def_mods", "ctrl_def_operators.py")
+    with open(percorso_ops, "r", encoding="utf-8") as file_ops:
+        testo_ops = file_ops.read()
+    assert testo_ops.index("_CP_GRUPPI = (") < testo_ops.index("def _rig_check_5_1("), \
+        "_CP_GRUPPI deve essere definito prima di _rig_check_5_1"
+    sorgente_nd = inspect.getsource(ops.naming_doctor)
+    # Aggiornare il depsgraph prima di _nd_update_constraints lo farebbe
+    # valutare con i subtarget ancora vecchi (warning "Failed to add relation"):
+    # i constraint si riallineano prima, l'update arriva dopo.
+    assert sorgente_nd.index("_nd_rename_bones(arm_obj") \
+        < sorgente_nd.index("_nd_update_constraints(arm_obj") \
+        < sorgente_nd.index("bpy.context.view_layer.update()"), \
+        "naming_doctor deve aggiornare i constraint prima di view_layer.update()"
+
+    # --- 3. Rig generato e vincolato -------------------------------------
+    arm_obj["_ctrl_def_generated"] = "{}"
+    reg._REGISTRY_CACHE.pop(id(arm_obj), None)
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"generate fallito: {res}"
+    assert set(mod._read_registry(arm_obj)) == {"arm.L", "forearm.L", "hand.L"}, \
+        f"Registry inatteso dopo generate: {mod._read_registry(arm_obj)!r}"
+    res_bind = bpy.ops.ctrl_def.bind_actd()
+    assert res_bind == {'FINISHED'}, f"bind_actd fallito: {res_bind}"
+    constraints_prima = [c.name for pb in arm_obj.pose.bones for c in pb.constraints]
+    assert "CTRL_DEF_COPY_TRANSFORMS" in constraints_prima, \
+        f"Nessun COPY_TRANSFORMS prima di remove: {constraints_prima!r}"
+
+    # --- 3b. Bone Collection complete fin da generate/add_ik -------------
+    coll_def = arm_data.collections.get("DEF")
+    assert coll_def is not None, "Collection DEF non creata da generate"
+    nomi_def = {b.name for b in coll_def.bones}
+    assert {"DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"} <= nomi_def, \
+        f"Bone DEF non assegnati alla collection DEF: {nomi_def!r}"
+    stg.ik_chain_length = 3
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito: {res_ik}"
+    coll_ik = arm_data.collections.get("IK")
+    assert coll_ik is not None, "Collection IK non creata da add_ik"
+    assert "IK_hand.L" in {b.name for b in coll_ik.bones}, \
+        f"Target IK non assegnato alla collection IK: {[b.name for b in coll_ik.bones]!r}"
+    coll_ctrls = arm_data.collections.get("CTRLS")
+    assert coll_ctrls is not None and \
+        "IK_hand.L" in {b.name for b in coll_ctrls.bones}, \
+        "add_ik ha tolto il target IK dalla collection CTRLS"
+    # MCH/ORG di prova: handoff deve nasconderle e bloccare i pose bone
+    for cn, nome_bone in (("MCH", "arm.L"), ("ORG", "forearm.L")):
+        coll = arm_data.collections.get(cn)
+        if coll is None:
+            coll = arm_data.collections.new(cn)
+        coll.assign(arm_data.bones[nome_bone])
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
+    res_h = bpy.ops.ctrl_def.handoff_animator()
+    assert res_h == {'FINISHED'}, f"handoff_animator fallito: {res_h}"
+    for cn in ("MCH", "ORG"):
+        coll = arm_data.collections.get(cn)
+        assert coll is not None and \
+            bool(getattr(coll, "is_visible", True)) is False, \
+            f"Collection {cn} non nascosta da handoff_animator"
+    res_restore = bpy.ops.ctrl_def.restore_rigger()
+    assert res_restore == {'FINISHED'}, f"restore_rigger fallito: {res_restore}"
+    assert hasattr(bpy.ops.ctrl_def, "character_picker"), \
+        "Operatore ctrl_def.character_picker non registrato"
+    res_cp = bpy.ops.ctrl_def.character_picker()
+    assert res_cp == {'FINISHED'}, f"character_picker fallito: {res_cp}"
+
+    # --- 4. Draw completo del pannello -----------------------------------
+    registro = {"labels": [], "props": [], "operators": [], "panels": []}
+
+    class _SegnapostoOperatore:
+        """Valore di ritorno di operator(): serve solo l'attributo url."""
+
+    class _FakeLayout:
+        """UILayout finto che registra le chiamate del draw (headless)."""
+
+        def __init__(self):
+            self.scale_y = 1.0
+
+        def label(self, text="", icon="NONE"):
+            registro["labels"].append(text)
+
+        def prop(self, data, name, text="", slider=False):
+            registro["props"].append(name)
+
+        def operator(self, idname, text="", icon="NONE"):
+            registro["operators"].append(idname)
+            return _SegnapostoOperatore()
+
+        def row(self, align=False):
+            return _FakeLayout()
+
+        def column(self, align=False):
+            return _FakeLayout()
+
+        def box(self):
+            return _FakeLayout()
+
+        def panel(self, chiave, default_closed=False):
+            registro["panels"].append(chiave)
+            return (_FakeLayout(), _FakeLayout())
+
+    def _disegna():
+        for chiave in ("labels", "props", "operators", "panels"):
+            registro[chiave] = []
+        finto = type("FintoPanel", (), {"layout": _FakeLayout()})()
+        mod.CTRLDEF_PT_panel.draw(finto, bpy.context)
+
+    _disegna()
+    for chiave in ("sec.setup", "sec.controller", "sec.advanced", "sec.guide"):
+        assert chiave in registro["panels"], \
+            f"Sezione {chiave} non disegnata dal pannello: {registro['panels']!r}"
+    assert mod.tr("panel.stats") in registro["labels"], \
+        f"Riga di stato non disegnata: {registro['labels']!r}"
+    attesa = mod.tr("stats.line") % (3, 3)
+    assert attesa in registro["labels"], \
+        f"Conteggi non disegnati: atteso {attesa!r} in {registro['labels']!r}"
+    for idname in ("ctrl_def.generate", "ctrl_def.bind_actd",
+                   "ctrl_def.auto_collection", "ctrl_def.handoff_animator",
+                   "ctrl_def.restore_rigger", "ctrl_def.add_ik",
+                   "ctrl_def.snap_ik_to_fk", "ctrl_def.bake_ik_to_fk",
+                   "ctrl_def.set_ik_target_space", "ctrl_def.diagnose",
+                   "ctrl_def.rig_score", "ctrl_def.manifest",
+                   "ctrl_def.manifest_diff", "ctrl_def.remap",
+                   "ctrl_def.naming_doctor", "ctrl_def.remove"):
+        assert idname in registro["operators"], \
+            f"Operatore {idname} non disegnato: {registro['operators']!r}"
+    assert "ik_target_space" in registro["props"], \
+        f"Prop ik_target_space non disegnata: {registro['props']!r}"
+    # L'origine del pole target compare solo con ik_create_pole attivo
+    stg.ik_create_pole = False
+    _disegna()
+    assert "ik_pole_source" not in registro["props"], \
+        "ik_pole_source disegnata con ik_create_pole disattivo"
+    stg.ik_create_pole = True
+    _disegna()
+    assert "ik_pole_source" in registro["props"], \
+        f"ik_pole_source non disegnata con ik_create_pole attivo: {registro['props']!r}"
+    stg.ik_create_pole = False
+
+    # --- 4b. _purge_unused_shapes rimuove anche la Mesh orfana -----------
+    mesh_orfana = bpy.data.meshes.new("CTRL_DEF_SHAPE_purge")
+    obj_orfano = bpy.data.objects.new("CTRL_DEF_SHAPE_purge", mesh_orfana)
+    bpy.context.scene.collection.objects.link(obj_orfano)
+    nome_mesh_orfana = mesh_orfana.name
+    nome_obj_orfano = obj_orfano.name
+    assert mesh_orfana.users == 1, \
+        f"Mesh di prova gia' condivisa: users={mesh_orfana.users}"
+    ops._purge_unused_shapes(arm_obj)
+    assert bpy.data.objects.get(nome_obj_orfano) is None, \
+        "_purge_unused_shapes non ha rimosso l'oggetto widget inutilizzato"
+    assert bpy.data.meshes.get(nome_mesh_orfana) is None, \
+        "_purge_unused_shapes ha lasciato orfana in bpy.data.meshes la Mesh " \
+        f"del widget {nome_mesh_orfana}"
+
+    # --- 5. remove: constraint tolti prima della cancellazione dei bone ---
+    osservato = {}
+    originale_remove_bones = ops._remove_registered_bones
+
+    def _spia_remove_bones(arm_arg, data_arg):
+        osservato["constraints"] = [c.name for pb in arm_arg.pose.bones
+                                    for c in pb.constraints]
+        osservato["bone_prima"] = set(b.name for b in arm_arg.data.bones)
+        return originale_remove_bones(arm_arg, data_arg)
+
+    ops._remove_registered_bones = _spia_remove_bones
+    try:
+        res_rm = bpy.ops.ctrl_def.remove()
+    finally:
+        ops._remove_registered_bones = originale_remove_bones
+    assert res_rm == {'FINISHED'}, f"remove fallito: {res_rm}"
+    assert osservato["constraints"] == [], (
+        "remove entra in Edit Mode con constraint ancora attivi "
+        f"(warning depsgraph BONE_DONE): {osservato['constraints']!r}")
+    assert {"arm.L", "forearm.L", "hand.L"} <= osservato["bone_prima"], \
+        "La spia non ha visto i controller registrati prima della rimozione"
+    bpy.context.view_layer.update()
+    assert mod._read_registry(arm_obj) == {}, \
+        f"Registry non vuoto dopo remove: {mod._read_registry(arm_obj)!r}"
+    for pbone in arm_obj.pose.bones:
+        for con in pbone.constraints:
+            assert getattr(con, "name", "") not in (
+                "CTRL_DEF_COPY_TRANSFORMS", "CTRL_DEF_IK"), \
+                f"Constraint {con.name} superstite su {pbone.name}"
+            assert getattr(con, "subtarget", "") not in (
+                "arm.L", "forearm.L", "hand.L", "IK_arm.L", "IK_forearm.L",
+                "IK_hand.L"), f"Constraint verso bone rimosso su {pbone.name}"
+    assert "DEF_arm.L" in arm_data.bones, "remove ha toccato i DEF di partenza"
+
+    # --- 6. remove: le collection gestite rimaste vuote spariscono -------
+    for cn in ("CTRLS", "IK", "MCH", "ORG"):
+        assert arm_data.collections.get(cn) is None, \
+            f"Collection {cn} vuota superstite dopo remove"
+
+
+def test_all_pipeline_and_parent_modes():
+    """Matrice completa pipeline_mode x parent: nessuna collection vuota.
+
+    Per ognuna delle 6 pipeline e dei 5 parenting si genera un controller per
+    ogni bone sorgente e si verifica che ogni collection gestita nata dalla
+    generazione contenga almeno un bone: in particolare non deve mai restare
+    una "DEF" vuota sulle pipeline MCH_ORG e ORG_CTRL. Poi remove deve lasciare
+    registro vuoto, zero controller registrati e zero collection gestite vuote.
+    """
+    _reset()
+    mod = _addon_module()
+    modi = ("DEF_CTRL", "DEF_MCH_CTRL", "DEF_ORG_MCH_CTRL",
+            "MCH_ORG", "ORG_CTRL", "CUSTOM")
+    genitori = ("CHAIN", "BONE", "ROOT", "NONE", "DEF")
+    gestite = ("CTRLS", "IK", "DEF", "MCH", "ORG")
+    # Attese esplicite per pipeline (numero di controller registrati, bone
+    # collection nate): non si chiama _pipeline_steps, altrimenti il test
+    # ripeterebbe il codice di produzione invece di verificarlo. Con i due
+    # bone sorgente della matrice ogni step registra due controller. La
+    # collection dei bone sorgente segue il prefisso della modalita': su
+    # MCH_ORG i due sorgente finiscono in "MCH" e i due generati in "ORG",
+    # su ORG_CTRL i sorgente in "ORG" e i controller in "CTRLS".
+    attese_per_mode = {
+        "DEF_CTRL": (2, ("DEF", "CTRLS")),
+        "DEF_MCH_CTRL": (4, ("DEF", "MCH", "CTRLS")),
+        "DEF_ORG_MCH_CTRL": (6, ("DEF", "ORG", "MCH", "CTRLS")),
+        "MCH_ORG": (2, ("MCH", "ORG")),
+        "ORG_CTRL": (2, ("ORG", "CTRLS")),
+        "CUSTOM": (2, ("DEF", "CTRLS")),
+    }
+    for modo in modi:
+        for genitore in genitori:
+            _reset()
+            stg = bpy.context.scene.ctrl_def_settings
+            stg.pipeline_mode = modo
+            stg.parent = genitore
+            if modo == "CUSTOM":
+                # CUSTOM non tocca i prefissi: si impostano a mano
+                stg.prefix_def = "DEF_"
+                stg.prefix_ctrl = ""
+            prefix_def = stg.prefix_def
+            etichetta = "%s/%s" % (modo, genitore)
+            arm_obj, arm_data = _new_armature("RigMatrice")
+            bpy.ops.object.mode_set(mode='EDIT')
+            _add_bone(arm_data, prefix_def + "upper",
+                      (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+            _add_bone(arm_data, prefix_def + "lower",
+                      (0.0, 0.0, 1.5), (0.0, 0.0, 2.0), prefix_def + "upper")
+            bpy.ops.object.mode_set(mode='OBJECT')
+            sorgenti = (prefix_def + "upper", prefix_def + "lower")
+            _seleziona_def(arm_obj, sorgenti)
+            res = bpy.ops.ctrl_def.generate()
+            assert res == {'FINISHED'}, f"generate fallito su {etichetta}: {res}"
+
+            attesi, colls_attese = attese_per_mode[modo]
+            data = mod._read_registry(arm_obj)
+            assert len(data) == attesi, \
+                f"{etichetta}: attesi {attesi} controller, trovati {len(data)}"
+            for nome_coll in colls_attese:
+                coll = arm_data.collections.get(nome_coll)
+                assert coll is not None, \
+                    f"{etichetta}: collection attesa {nome_coll} mai creata"
+                assert len(coll.bones) > 0, \
+                    f"{etichetta}: collection gestita vuota {nome_coll}"
+            assert set(arm_data.collections.keys()) == set(colls_attese), \
+                f"{etichetta}: collection create {sorted(arm_data.collections.keys())}" \
+                f" invece di {sorted(colls_attese)}"
+            for nome_src in sorgenti:
+                assert arm_data.bones.get(nome_src) is not None, \
+                    f"{etichetta}: bone sorgente {nome_src} perso da generate"
+
+            if genitore == "ROOT" and modo in ("DEF_MCH_CTRL", "DEF_ORG_MCH_CTRL"):
+                # Ogni layer ha la propria radice indipendente: agganciare il
+                # genitore ROOT al DEF_root chiude un Dependency Cycle quando
+                # bind_actd vincola DEF_root a MCH_root/ORG_root.
+                radici = {
+                    "DEF_MCH_CTRL": ("MCH_upper", "upper"),
+                    "DEF_ORG_MCH_CTRL": ("ORG_upper", "MCH_upper", "upper"),
+                }[modo]
+                for nome_radice in radici:
+                    bone_radice = arm_data.bones.get(nome_radice)
+                    assert bone_radice is not None, \
+                        f"{etichetta}: radice {nome_radice} mai generata"
+                    assert bone_radice.parent is None, \
+                        f"{etichetta}: radice {nome_radice} agganciata a " \
+                        f"{bone_radice.parent.name} (ciclo con DEF_root)"
+
+            res_rim = bpy.ops.ctrl_def.remove()
+            assert res_rim == {'FINISHED'}, \
+                f"remove fallito su {etichetta}: {res_rim}"
+            assert mod._read_registry(arm_obj) == {}, \
+                f"{etichetta}: registro non svuotato dopo remove"
+            for nome_ctrl in data:
+                assert arm_data.bones.get(nome_ctrl) is None, \
+                    f"{etichetta}: controller {nome_ctrl} superstite dopo remove"
+            for nome_coll in gestite:
+                coll = arm_data.collections.get(nome_coll)
+                if coll is None:
+                    continue
+                assert len(coll.bones) > 0, \
+                    f"{etichetta}: collection gestita vuota superstite {nome_coll}"
+            for nome_src in sorgenti:
+                assert arm_data.bones.get(nome_src) is not None, \
+                    f"{etichetta}: remove ha toccato il bone sorgente {nome_src}"
+
+
+def test_export_json_csv_and_user_presets_roundtrip():
+    """Preset utente v0.5 e export mappa dopo cancellazione manuale.
+
+    Il preset deve serializzare e ripristinare anche ik_pole_source,
+    ik_target_space e ik_chain_length; un JSON non-dict va rifiutato con
+    CANCELLED e un enum obsoleto va saltato senza far fallire il caricamento.
+    export_json/export_csv devono potato il registro (controller cancellato a
+    mano in Edit Mode) prima di scrivere.
+    """
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    cartella = tempfile.mkdtemp(prefix="ctrl_def_preset_v05_")
+    percorso = os.path.join(cartella, "preset_v05.json")
+    valori = {
+        "pipeline_mode": "DEF_ORG_MCH_CTRL",
+        "widget_name": "Sphere",
+        "scale": 1.3,
+        "parent": "BONE",
+        "mirror": True,
+        "lock_mch_org": False,
+        "ik_align_world_y": False,
+        "ik_create_pole": True,
+        "ik_chain_length": 5,
+        "ik_pole_source": "MESH",
+        "ik_target_space": "OBJECT",
+    }
+    for chiave, valore in valori.items():
+        setattr(stg, chiave, valore)
+    res_save = bpy.ops.ctrl_def.save_preset(filepath=percorso)
+    assert res_save == {'FINISHED'}, f"save_preset fallito: {res_save}"
+    with open(percorso, "r", encoding="utf-8") as file_preset:
+        salvato = json.load(file_preset)
+    for chiave in ("ik_pole_source", "ik_target_space", "ik_chain_length",
+                   "pipeline_mode"):
+        assert chiave in salvato, \
+            f"save_preset non serializza {chiave}: {sorted(salvato)}"
+
+    # Azzera tutto e ricarica: ogni impostazione deve tornare com'era
+    stg.widget_name = "Circle"
+    stg.scale = 0.5
+    stg.parent = "CHAIN"
+    stg.mirror = False
+    stg.lock_mch_org = True
+    stg.ik_align_world_y = True
+    stg.ik_create_pole = False
+    stg.ik_chain_length = 1
+    stg.ik_pole_source = "BONE"
+    stg.ik_target_space = "WORLD"
+    stg.pipeline_mode = "DEF_CTRL"
+    res_load = bpy.ops.ctrl_def.load_preset(filepath=percorso)
+    assert res_load == {'FINISHED'}, f"load_preset fallito: {res_load}"
+    assert stg.widget_name == "Sphere", \
+        f"widget_name non ripristinato: {stg.widget_name!r}"
+    assert abs(stg.scale - 1.3) < 1e-4, f"scale non ripristinata: {stg.scale}"
+    assert stg.parent == "BONE", f"parent non ripristinato: {stg.parent!r}"
+    assert stg.mirror is True, f"mirror non ripristinato: {stg.mirror}"
+    assert stg.lock_mch_org is False, f"lock_mch_org non ripristinato: {stg.lock_mch_org}"
+    assert stg.ik_align_world_y is False, \
+        f"ik_align_world_y non ripristinato: {stg.ik_align_world_y}"
+    assert stg.ik_create_pole is True, \
+        f"ik_create_pole non ripristinato: {stg.ik_create_pole}"
+    assert stg.ik_chain_length == 5, \
+        f"ik_chain_length non ripristinato: {stg.ik_chain_length}"
+    assert stg.ik_pole_source == "MESH", \
+        f"ik_pole_source non ripristinato: {stg.ik_pole_source!r}"
+    assert stg.ik_target_space == "OBJECT", \
+        f"ik_target_space non ripristinato: {stg.ik_target_space!r}"
+    assert stg.pipeline_mode == "DEF_ORG_MCH_CTRL", \
+        f"pipeline_mode non ripristinato: {stg.pipeline_mode!r}"
+
+    # Enum obsoleto nel JSON: saltato, il resto del preset si applica
+    percorso_invalido = os.path.join(cartella, "preset_invalido.json")
+    with open(percorso_invalido, "w", encoding="utf-8") as file_inv:
+        json.dump({"widget_name": "Cube",
+                   "parent": "ENUM_OBSOLETO",
+                   "ik_target_space": "PIANETA_X",
+                   "ik_chain_length": 4}, file_inv)
+    stg.parent = "ROOT"
+    stg.ik_target_space = "LOCAL"
+    res_inv = bpy.ops.ctrl_def.load_preset(filepath=percorso_invalido)
+    assert res_inv == {'FINISHED'}, \
+        f"load_preset con enum invalido non deve fallire: {res_inv}"
+    assert stg.widget_name == "Cube", \
+        f"valore valido non applicato accanto a un enum invalido: {stg.widget_name!r}"
+    assert stg.ik_chain_length == 4, \
+        f"ik_chain_length valido non applicato: {stg.ik_chain_length}"
+    assert stg.parent == "ROOT", \
+        f"enum invalido ha sporcato parent: {stg.parent!r}"
+    assert stg.ik_target_space == "LOCAL", \
+        f"enum invalido ha sporcato ik_target_space: {stg.ik_target_space!r}"
+
+    # JSON non-dict: CANCELLED, nessuna impostazione toccata
+    percorso_lista = os.path.join(cartella, "preset_lista.json")
+    with open(percorso_lista, "w", encoding="utf-8") as file_lista:
+        json.dump(["widget_name", "scale"], file_lista)
+    prima = (stg.widget_name, stg.scale, stg.parent)
+    # Il rifiuto e' un WARNING: bpy.ops restituisce CANCELLED, nessuna eccezione
+    res_lista = bpy.ops.ctrl_def.load_preset(filepath=percorso_lista)
+    assert res_lista == {'CANCELLED'}, \
+        f"load_preset di un JSON non-dict: {res_lista} invece di {{'CANCELLED'}}"
+    assert (stg.widget_name, stg.scale, stg.parent) == prima, \
+        "load_preset ha applicato un JSON non-dict"
+
+    # Export mappa dopo cancellazione manuale di un controller in Edit Mode
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.pipeline_mode = "DEF_CTRL"
+    stg.prefix_def = "DEF_"
+    stg.prefix_ctrl = ""
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigExportPotato")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res_gen = bpy.ops.ctrl_def.generate()
+    assert res_gen == {'FINISHED'}, f"Generazione fallita: {res_gen}"
+    mod = _addon_module()
+    assert "forearm.L" in mod._read_registry(arm_obj), \
+        "Il controller forearm.L non e' registrato da generate"
+    # Il registro resta stale finche' export non lo pota
+    bpy.ops.object.mode_set(mode='EDIT')
+    ebone = arm_data.edit_bones.get("forearm.L")
+    assert ebone is not None, "Controller forearm.L assente prima della cancellazione"
+    arm_data.edit_bones.remove(ebone)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    assert "forearm.L" in mod._read_registry(arm_obj), \
+        "La voce stale deve essere ancora nel registro prima dell'export"
+
+    percorso_json = os.path.join(cartella, "mapping.json")
+    res_json = bpy.ops.ctrl_def.export_json(filepath=percorso_json)
+    assert res_json == {'FINISHED'}, f"export_json fallito: {res_json}"
+    with open(percorso_json, "r", encoding="utf-8") as file_json:
+        contenuto = json.load(file_json)
+    assert set(contenuto["mapping"].keys()) == {"arm.L", "hand.L"}, \
+        f"export_json non ha potato il registro: {sorted(contenuto['mapping'])}"
+    assert "forearm.L" not in mod._read_registry(arm_obj), \
+        "export_json non ha potato il registro sull'armatura"
+
+    percorso_csv = os.path.join(cartella, "mapping.csv")
+    res_csv = bpy.ops.ctrl_def.export_csv(filepath=percorso_csv)
+    assert res_csv == {'FINISHED'}, f"export_csv fallito: {res_csv}"
+    with open(percorso_csv, "r", encoding="utf-8") as file_csv:
+        testo_csv = file_csv.read()
+    assert "arm.L" in testo_csv and "hand.L" in testo_csv, \
+        f"export_csv non contiene i controller sopravvissuti: {testo_csv!r}"
+    assert "forearm.L" not in testo_csv, \
+        f"export_csv contiene il controller cancellato: {testo_csv!r}"
+
+
+def test_diagnose_preflight_edge_cases():
+    """Diagnostica Pre-Flight: lunghezza zero, mirror orfano, collisione, rig pulito."""
+    _reset()
+    mod = _addon_module()
+    assert callable(getattr(mod, "_diagnose_def_selection", None)), \
+        "Helper _diagnose_def_selection mancante o non chiamabile nel modulo"
+
+    # 1) Bone DEF di lunghezza < 1e-6: segnalato in Edit Mode, dove Blender
+    # conserva la lunghezza esatta (in Object Mode la normalizza a ~2e-6)
+    arm_obj, arm_data = _new_armature("RigDiagZeroLength")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_zero", (0.0, 0.0, 1.0), (0.0, 0.0, 1.0))
+    _add_bone(arm_data, "DEF_sano", (0.0, 0.0, 2.0), (0.0, 0.0, 2.5))
+    stg = bpy.context.scene.ctrl_def_settings
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["zero_length"] == ["DEF_zero"], \
+        f"Bone di lunghezza zero non segnalato: {diag}"
+    res = bpy.ops.ctrl_def.diagnose()
+    assert res == {'FINISHED'}, f"ctrl_def.diagnose fallito: {res}"
+    salvata = json.loads(arm_obj["_ctrl_def_last_diagnosis"])
+    assert salvata["zero_length"] == ["DEF_zero"], \
+        f"Riepilogo JSON senza la lunghezza zero: {salvata}"
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # 2) mirror attivo con .L senza .R: segnalata solo la controparte assente
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.mirror = True
+    arm_obj, arm_data = _new_armature("RigDiagMirrorOrfano")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["missing_mirror"] == ["DEF_arm.R"], \
+        f"Controparte mancante attesa ['DEF_arm.R'], trovata {diag['missing_mirror']}"
+    assert diag["zero_length"] == [], f"zero_length inatteso: {diag}"
+
+    # 3) Collisione con bone non-DEF esistente e parent="DEF"
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.mirror = False
+    stg.parent = "DEF"
+    arm_obj, arm_data = _new_armature("RigDiagCollisioneEdge")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "arm.L", (0.0, 0.0, 2.0), (0.0, 0.0, 2.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    diag = mod._diagnose_def_selection(arm_obj, stg)
+    assert diag["name_collisions"] == ["arm.L"], \
+        f"Collisione attesa ['arm.L'], trovata {diag['name_collisions']}"
+    assert diag["parent_def_cycle"] is True, \
+        f"parent='DEF' non segnalato: {diag}"
+    res = bpy.ops.ctrl_def.diagnose()
+    assert res == {'FINISHED'}, f"ctrl_def.diagnose fallito con parent DEF: {res}"
+    salvata = json.loads(arm_obj["_ctrl_def_last_diagnosis"])
+    assert salvata["parent_def_cycle"] is True, \
+        f"Riepilogo JSON senza parent_def_cycle: {salvata}"
+    assert salvata["name_collisions"] == ["arm.L"], \
+        f"Riepilogo JSON senza la collisione attesa: {salvata}"
+
+    # 4) Rig pulito: diagnosi vuota, quindi il report e' msg.diag_ok
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.mirror = False
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigDiagPulitaEdge")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    _add_bone(arm_data, "DEF_arm.R", (0.0, 0.0, -1.0), (0.0, 0.0, -1.5))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    res = bpy.ops.ctrl_def.diagnose()
+    assert res == {'FINISHED'}, f"ctrl_def.diagnose fallito su rig pulito: {res}"
+    salvata = json.loads(arm_obj["_ctrl_def_last_diagnosis"])
+    assert salvata == {"zero_length": [], "missing_mirror": [],
+                       "name_collisions": [], "parent_def_cycle": False}, \
+        f"Rig pulito con problemi segnalati (nessun msg.diag_ok): {salvata}"
+
+
+def test_end_to_end_full_production_workflow():
+    """Workflow produttivo completo multi-layer, da generate a remove."""
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    stg.pipeline_mode = "DEF_ORG_MCH_CTRL"
+    stg.ik_chain_length = 3
+    stg.ik_create_pole = False
+    stg.lock_mch_org = True
+    mod = _addon_module()
+
+    src_obj, src_data = _new_armature("RigPipelineSrc")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(src_data)
+    # Due bone extra (non-DEF) per lo swap circolare del naming_doctor.
+    # extraB.L ha un genitore diverso: dopo lo swap la gerarchia cambia
+    # davvero e manifest_diff ha qualcosa da segnalare.
+    _add_bone(src_data, "extraA.L", (1.0, 0.0, 1.0), (1.0, 0.0, 1.2))
+    _add_bone(src_data, "extraB.L", (2.0, 0.0, 1.0), (2.0, 0.0, 1.2), "DEF_arm.L")
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(src_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res_gen = bpy.ops.ctrl_def.generate()
+    assert res_gen == {'FINISHED'}, f"generate multi-layer fallito: {res_gen}"
+    data = mod._read_registry(src_obj)
+    assert len(data) == 9, \
+        f"Attesi 9 controller (3 bone x 3 step), trovati {len(data)}: {sorted(data)}"
+    for nome in ("arm.L", "forearm.L", "hand.L"):
+        assert nome in data, f"Controller finale {nome} assente dal registro"
+
+    # bind_actd: percorso nativo, i DEF seguono il controller finale
+    res_bind = bpy.ops.ctrl_def.bind_actd()
+    assert res_bind == {'FINISHED'}, f"bind_actd fallito: {res_bind}"
+    for nome_def in ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"):
+        pb = src_obj.pose.bones.get(nome_def)
+        assert pb is not None, f"DEF {nome_def} assente dopo bind_actd"
+        copie = [c for c in pb.constraints if c.type == 'COPY_TRANSFORMS']
+        assert copie, f"{nome_def} non vincolato ai controller dopo bind_actd"
+
+    # IK sulla catena FK
+    mod._ensure_armature_mode(bpy.context, src_obj, 'POSE')
+    _seleziona_posa(src_obj, None, False)
+    _seleziona_posa(src_obj, ("arm.L", "forearm.L", "hand.L"), True)
+    catene = mod._selected_ctrl_chains(src_obj)
+    assert catene == [["arm.L", "forearm.L", "hand.L"]], \
+        f"Catena FK letta male prima di add_ik: {catene}"
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito: {res_ik}"
+    assert src_data.bones.get("IK_hand.L") is not None, \
+        "Target IK_hand.L non creato da add_ik"
+
+    # Character picker
+    bpy.context.view_layer.objects.active = src_obj
+    src_obj.select_set(True)
+    res_cp = mod.character_picker(src_obj)
+    assert res_cp == {'FINISHED'}, f"character_picker fallito: {res_cp}"
+
+    # Manifest baseline
+    cartella = tempfile.mkdtemp(prefix="ctrl_def_e2e_")
+    manifest_a = os.path.join(cartella, "manifest_a.json")
+    manifest_b = os.path.join(cartella, "manifest_b.json")
+    res_man = bpy.ops.ctrl_def.manifest(filepath=manifest_a)
+    assert res_man == {'FINISHED'}, f"manifest fallito: {res_man}"
+    assert os.path.isfile(manifest_a), f"Manifest non scritto: {manifest_a}"
+
+    # naming_doctor con swap circolare A->B, B->A
+    testa_a = src_data.bones["extraA.L"].head_local.copy()
+    res_nd = mod.naming_doctor(src_obj,
+                               {"extraA.L": "extraB.L", "extraB.L": "extraA.L"})
+    assert res_nd == {'FINISHED'}, f"naming_doctor (swap) fallito: {res_nd}"
+    assert (src_data.bones["extraB.L"].head_local - testa_a).length < 1e-6, \
+        "Swap circolare non applicato: extraB.L non ha la testa del vecchio extraA.L"
+
+    # manifest_diff: la rinomina cambia la gerarchia
+    res_diff = bpy.ops.ctrl_def.manifest_diff(filepath=manifest_b,
+                                              baseline=manifest_a)
+    assert res_diff == {'FINISHED'}, f"manifest_diff fallito: {res_diff}"
+    diff_grezzo = None
+    for chiave in ("_ctrl_def_last_manifest_diff", "_ctrl_def_manifest_diff",
+                   "ctrl_def_manifest_diff", "_ctrl_def_last_diff"):
+        valore = src_obj.get(chiave)
+        if valore is not None:
+            diff_grezzo = valore
+            break
+    assert diff_grezzo is not None, "manifest_diff non ha memorizzato alcun diff"
+    diff = json.loads(diff_grezzo) if isinstance(diff_grezzo, str) else diff_grezzo
+    assert "hierarchy" in diff.get("changed", []), \
+        f"Il diff non segnala il cambio di gerarchia: {diff}"
+
+    # Handoff animatore: CTRL visibili, DEF nascosta
+    bpy.context.view_layer.objects.active = src_obj
+    res_handoff = bpy.ops.ctrl_def.handoff_animator()
+    assert res_handoff == {'FINISHED'}, f"handoff_animator fallito: {res_handoff}"
+    coll_def = src_data.collections.get("DEF")
+    assert coll_def is not None, "Collection DEF assente dopo handoff"
+    assert bool(getattr(coll_def, "is_visible", True)) is False, \
+        "DEF non nascosta dopo handoff_animator"
+
+    # Secondo rig identico e remap della posa
+    dst_obj, dst_data = _new_armature("RigPipelineDst")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(dst_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(dst_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res_gen_dst = bpy.ops.ctrl_def.generate()
+    assert res_gen_dst == {'FINISHED'}, \
+        f"generate sul secondo rig fallito: {res_gen_dst}"
+    bpy.context.view_layer.objects.active = dst_obj
+    res_remap = bpy.ops.ctrl_def.remap(source_armature=src_obj.name,
+                                       target_armature=dst_obj.name)
+    assert res_remap == {'FINISHED'}, f"remap fallito: {res_remap}"
+
+    # Bake IK -> FK sul rig sorgente
+    bpy.context.view_layer.objects.active = src_obj
+    src_obj.select_set(True)
+    mod._ensure_armature_mode(bpy.context, src_obj, 'POSE')
+    res_bake = bpy.ops.ctrl_def.bake_ik_to_fk()
+    assert res_bake == {'FINISHED'}, f"bake_ik_to_fk fallito: {res_bake}"
+    assert src_obj.pose.bones["arm.L"].constraints.get("CTRL_DEF_IK") is None, \
+        "Il constraint IK e' rimasto dopo bake_ik_to_fk"
+
+    # Restore rigger e rig_score
+    bpy.context.view_layer.objects.active = src_obj
+    res_restore = bpy.ops.ctrl_def.restore_rigger()
+    assert res_restore == {'FINISHED'}, f"restore_rigger fallito: {res_restore}"
+    res_score = bpy.ops.ctrl_def.rig_score()
+    assert res_score == {'FINISHED'}, f"rig_score fallito: {res_score}"
+
+    # Remove finale: registro vuoto, controller spariti, nessuna coll gestita vuota
+    res_rim = bpy.ops.ctrl_def.remove()
+    assert res_rim == {'FINISHED'}, f"remove finale fallito: {res_rim}"
+    assert mod._read_registry(src_obj) == {}, \
+        "Registro non svuotato dal remove finale"
+    for nome_ctrl in data:
+        assert src_data.bones.get(nome_ctrl) is None, \
+            f"Controller {nome_ctrl} superstite dopo remove"
+    for cn in ("CTRLS", "IK", "MCH", "ORG", "DEF"):
+        coll = src_data.collections.get(cn)
+        if coll is None:
+            continue
+        assert len(coll.bones) > 0, f"Collection gestita vuota dopo remove: {cn}"
+    assert src_data.bones.get("DEF_arm.L") is not None, \
+        "remove ha toccato i DEF di partenza"
+
+
 if __name__ == "__main__":
     _registra_addon_se_mancante()
-    test_registration_elements()
-    test_naming_pulito_e_prefisso()
-    test_parent_chain_fk()
-    test_bind_actd_rotazione()
-    test_presets()
-    test_rinomina_bone_mantiene_shape_e_constraint()
-    print("RISULTATO passati=6 falliti=0 totale=6")
+    _TEST = (
+        test_registration_elements,
+        test_naming_pulito_e_prefisso,
+        test_parent_chain_fk,
+        test_bind_actd_rotazione,
+        test_presets,
+        test_rinomina_bone_mantiene_shape_e_constraint,
+        test_snap_ik_to_fk,
+        test_bake_ik_to_fk,
+        test_snap_selezione_vuota,
+        test_snap_catena_non_registrata,
+        test_snap_armatura_senza_ik,
+        test_snap_preserva_constraint_roll_ordine,
+        test_bake_frame_range,
+        test_bake_doppia_esecuzione,
+        test_set_ik_target_space,
+        test_ik_pole_mesh_source,
+        test_rig_health_score,
+        test_rig_score_no_false_fail,
+        test_remap_animazione,
+        test_manifest_diff,
+        test_manifest_diff_edge_cases,
+        test_auto_collection,
+        test_auto_collection_mch_org_unassign,
+        test_handoff_animatore,
+        test_naming_doctor_safe_rename,
+        test_character_picker_auto,
+        test_character_picker_keywords_it,
+        test_i18n_complete,
+        test_registry_hardening_and_batch,
+        test_operators_hardening_complex,
+        test_ui_and_depsgraph_optimization,
+        test_all_pipeline_and_parent_modes,
+        test_export_json_csv_and_user_presets_roundtrip,
+        test_diagnose_preflight_edge_cases,
+        test_end_to_end_full_production_workflow,
+    )
+    _passati = 0
+    _falliti = 0
+    for _test in _TEST:
+        try:
+            _test()
+            _passati += 1
+        except Exception as _exc:  # un test fallito non ferma la suite
+            _falliti += 1
+            print("FAIL", _test.__name__, repr(_exc))
+    print("RISULTATO passati={} falliti={} totale={}".format(
+        _passati, _falliti, len(_TEST)))

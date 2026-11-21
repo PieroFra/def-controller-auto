@@ -6,7 +6,7 @@ from mathutils import Vector
 from bpy.types import Operator
 
 from .ctrl_def_i18n import tr
-from .ctrl_def_registry import _mark_generated
+from .ctrl_def_registry import _mark_generated_batch
 from .ctrl_def_shapes import _is_def_bone, _mirror_name
 
 # ===========================================================================
@@ -119,6 +119,14 @@ def _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg):
     # sia un controller appena creato
     ctrl_names = set(def_to_ctrl_name.values())
     root_ebone = next((eb for eb in ebones if eb.parent is None and eb.name not in ctrl_names), None)
+    # Radice dello step corrente: sulle pipeline a piu' passaggi (DEF_MCH_CTRL,
+    # DEF_ORG_MCH_CTRL) il genitore "ROOT" deve essere il controller radice
+    # creato in questo step, non il DEF_root. Altrimenti il passo successivo
+    # aggancia CTRL_root a DEF_root e bind_actd chiude un Dependency Cycle
+    # (CTRL_root -> DEF_root -> MCH_root -> CTRL_root).
+    root_src = next((x for x in da_fare if x.parent is None), None)
+    step_root_ebone = (ebones.get(def_to_ctrl_name[root_src.name])
+                       if root_src is not None else root_ebone)
     # Secondo passaggio per il parent
     for b in da_fare:
         ebone = ebones.get(def_to_ctrl_name[b.name])
@@ -129,8 +137,14 @@ def _assign_ctrl_parents(ebones, da_fare, def_to_ctrl_name, stg):
         elif stg.parent == "BONE":
             ebone.parent = b.parent
         elif stg.parent == "ROOT":
-            # I wrapper EditBone cambiano istanza: il confronto e' per nome
-            ebone.parent = None if (root_ebone is not None and root_ebone.name == b.name) else root_ebone
+            # I wrapper EditBone cambiano istanza: il confronto e' per nome.
+            # Ogni layer resta sulla propria radice: nessun aggancio a DEF_root.
+            if (b.parent is None
+                    or (step_root_ebone is not None and step_root_ebone.name == ebone.name)
+                    or (root_ebone is not None and root_ebone.name == b.name)):
+                ebone.parent = None
+            else:
+                ebone.parent = step_root_ebone if step_root_ebone is not None else root_ebone
         elif stg.parent == "CHAIN":
             # FK tra controller: il CTRL del figlio segue il CTRL del genitore
             if b.parent is not None and b.parent.name in def_to_ctrl_name:
@@ -152,17 +166,23 @@ def _configure_ctrl_pose_bones(arm, created, stg, role="CTRL", bcoll_name="CTRLS
     """In Object Mode assegna la bone collection e iscrive i pose bone.
 
     Assicura la Bone Collection richiesta ("CTRLS", "MCH", "ORG") e iscrive
-    ogni coppia nel registro JSON con _mark_generated, indicando il ruolo per
-    i bone meccanici/originali. Con lock_mch_org attivo i bone MCH/ORG non
-    vengono ne' mostrati ne' mossi, cosi' non sporcano i keyframe.
-    Colore e custom shape non sono piu' gestiti qui: li governa l'estensione
-    opzionale Bone Widget. Restituisce il numero di controller configurati.
+    ogni coppia nel registro JSON in un colpo solo con _mark_generated_batch,
+    indicando il ruolo per i bone meccanici/originali. Con lock_mch_org attivo
+    i bone MCH/ORG non vengono ne' mostrati ne' mossi, cosi' non sporcano i
+    keyframe. Colore e custom shape non sono piu' gestiti qui: li governa
+    l'estensione opzionale Bone Widget. Restituisce il numero di controller
+    configurati.
     """
+    # Nessun bone da configurare: la collection non va nemmeno creata, cosi'
+    # non restano Bone Collection vuote dopo uno step senza risultati.
+    if not created:
+        return 0
     bcoll = arm.data.collections.get(bcoll_name)
     if bcoll is None:
         bcoll = arm.data.collections.new(bcoll_name)
     meccanico = role in ("MCH", "ORG")
     bloccato = meccanico and getattr(stg, "lock_mch_org", True)
+    nuove_voci = {}
     for name, def_name in created:
         bone = arm.data.bones.get(name)
         pbone = arm.pose.bones.get(name)
@@ -176,10 +196,12 @@ def _configure_ctrl_pose_bones(arm, created, stg, role="CTRL", bcoll_name="CTRLS
             pbone.lock_rotation = (True, True, True)
             pbone.lock_rotation_w = True
             pbone.lock_scale = (True, True, True)
+        voce = {"def": def_name}
         if meccanico:
-            _mark_generated(arm, name, def_name, role=role)
-        else:
-            _mark_generated(arm, name, def_name)
+            voce["role"] = role
+        nuove_voci[name] = voce
+    if nuove_voci:
+        _mark_generated_batch(arm, nuove_voci)
     # La collection meccanica resta nascosta: si animano solo i CTRL
     if bloccato and hasattr(bcoll, "is_visible"):
         bcoll.is_visible = False
@@ -208,32 +230,64 @@ class CTRLDEF_OT_generate(Operator):
         if arm.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.mode_set(mode='EDIT')
-        ebones = arm.data.edit_bones
-        da_fare = _collect_def_bones(ebones, stg)
-        if not da_fare:
-            bpy.ops.object.mode_set(mode='OBJECT')
-            self.report({'ERROR'}, tr("msg.no_def_bones"))
-            return {'CANCELLED'}
-        # Pipeline a uno o piu' step: ogni step consuma i bone dello step precedente
-        steps = _pipeline_steps(stg)
-        correnti = da_fare
-        configurati = []
-        for src_p, dst_p, role, bcoll_name in steps:
-            created_step, mappa_step = _create_ctrl_edit_bones(
-                ebones, correnti, stg,
-                src_prefix=src_p, dst_prefix=dst_p, role=role)
-            _assign_ctrl_parents(ebones, correnti, mappa_step, stg)
-            configurati.append((created_step, role, bcoll_name))
-            correnti = [ebones[nm] for nm, _ in created_step if nm in ebones]
-        # La selezione torna sui bone DEF di partenza, non sugli ultimi creati
-        for b in da_fare:
-            eb = ebones.get(b.name)
-            if eb is None:
+        # Il ritorno a OBJECT e' garantito dal finally: un'eccezione nella
+        # pipeline non deve lasciare l'armatura bloccata in Edit Mode.
+        try:
+            ebones = arm.data.edit_bones
+            da_fare = _collect_def_bones(ebones, stg)
+            if not da_fare:
+                self.report({'ERROR'}, tr("msg.no_def_bones"))
+                return {'CANCELLED'}
+            def_names = [b.name for b in da_fare]
+            # Pipeline a uno o piu' step: ogni step consuma i bone dello step precedente
+            steps = _pipeline_steps(stg)
+            correnti = da_fare
+            configurati = []
+            for src_p, dst_p, role, bcoll_name in steps:
+                created_step, mappa_step = _create_ctrl_edit_bones(
+                    ebones, correnti, stg,
+                    src_prefix=src_p, dst_prefix=dst_p, role=role)
+                _assign_ctrl_parents(ebones, correnti, mappa_step, stg)
+                configurati.append((created_step, role, bcoll_name))
+                correnti = [ebones[nm] for nm, _ in created_step if nm in ebones]
+            # La selezione torna sui bone DEF di partenza, non sugli ultimi creati
+            for b in da_fare:
+                eb = ebones.get(b.name)
+                if eb is None:
+                    continue
+                eb.select = True
+                eb.select_head = True
+                eb.select_tail = True
+        finally:
+            if arm.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+        # La collection dei bone sorgente che portano davvero il prefisso
+        # segue il prefisso stesso (MCH, ORG o DEF): senza candidati non nasce,
+        # cosi' le pipeline MCH_ORG e ORG_CTRL non lasciano mai una collection
+        # "DEF" vuota.
+        prefix_def = getattr(stg, "prefix_def", "DEF_") or "DEF_"
+        bone_da_def = []
+        for nome_def in def_names:
+            bone_def = arm.data.bones.get(nome_def)
+            if bone_def is None or not bone_def.name.startswith(prefix_def):
                 continue
-            eb.select = True
-            eb.select_head = True
-            eb.select_tail = True
-        bpy.ops.object.mode_set(mode='OBJECT')
+            if not _is_def_bone(bone_def, prefix_def):
+                continue
+            bone_da_def.append(bone_def)
+        if bone_da_def:
+            # I bone nativi MCH_/ORG_ non vanno etichettati come DEF.
+            if prefix_def.startswith("MCH"):
+                coll_nome = "MCH"
+            elif prefix_def.startswith("ORG"):
+                coll_nome = "ORG"
+            else:
+                coll_nome = "DEF"
+            coll_def = arm.data.collections.get(coll_nome)
+            if coll_def is None:
+                coll_def = arm.data.collections.new(coll_nome)
+            for bone_def in bone_da_def:
+                if coll_def.name not in (c.name for c in bone_def.collections):
+                    coll_def.assign(bone_def)
         # n_ctrl resta il conteggio dell'ultimo step, cioe' i veri controller
         n_ctrl = 0
         for created_step, role, bcoll_name in configurati:

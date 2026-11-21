@@ -4,19 +4,19 @@
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
-[![Version](https://img.shields.io/badge/version-0.3.3-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
+[![Version](https://img.shields.io/badge/version-0.5.0-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.3.3`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
+Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.5.0`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
 
 | | |
 |---|---|
 | **Compatibility** | **Blender 4.2 LTS — 5.2+** |
 | **Category** | **Rigging** |
-| **Version** | **0.3.3** |
+| **Version** | **0.5.0** |
 | **Author** | **Pierfrancesco Diodato** |
 | **Type** | Add-on (installable ZIP or folder) |
 | **License** | GPL-3.0-or-later |
@@ -56,6 +56,13 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 - **Themed color palette**: quick assignment following the Blender theme (Red, Green, Blue).
 - **Optional Bone Widget integration** (`v0.2.0`): the custom shape widgets of the generated controllers are delegated to the **Bone Widget** extension through `ctrl_def.create_widget` (built-in library picker); when the extension is not installed the panel warns and offers a **direct link** to its page.
 - **Quick IK target** (`v0.2.0`): `ctrl_def.add_ik` adds an IK target (optional pole pointer, `use_deform = False`) on a selected chain of 2‑3 controllers, with zero Dependency Cycles with A.C.T.D.
+- **IK chain & space switching** (`v0.4.0`): `ik_chain_length` (1–8) sets how many controllers of the selected chain the IK constraint covers; `ik_target_space` (World / Local / Object) with `ctrl_def.set_ik_target_space` changes the IK target space with matrix compensation, keeping the pose unchanged; `ik_pole_source` (BONE / MESH) picks the pole direction from the chain bend vector or from the mesh vertices.
+- **Remap animation** (`v0.5.0`): `ctrl_def.remap` transfers controller poses from a source rig to a target rig using the DEF->CTRL mapping, a free equivalent of the paid Remap module of competitors, gate `module-b-g2` (suite 18/18).
+- **Rig Health Score** (`v0.5.0`): `ctrl_def.rig_score` evaluates the rig with 30 checks in 5 categories and a synthetic score out of 30, gate `module-a-g5` (suite 17/17).
+- **Manifest + Diff** (`v0.5.0`): `ctrl_def.manifest` writes a structural JSON snapshot of the rig (registry, hierarchy, constraints, IK, deform) and `ctrl_def.manifest_diff` compares it against the current rig, warning about drift before you regenerate.
+- **Handoff Animator** (`v0.5.0`): `ctrl_def.handoff_animator` hands the rig to the animator in one click (CTRLS visible, DEF hidden, MCH/ORG locked) and `ctrl_def.restore_rigger` restores the previous state reversibly.
+- **Naming Doctor Safe Rename** (`v0.5.0`): `ctrl_def.naming_doctor` batch renames DEF/CTRL bones while safely updating the registry, constraints, widget shapes, IK targets and parents.
+- **Character Picker auto** (`v0.5.0`): `ctrl_def.character_picker` builds an automatic character picker with 7 groups (Root / Spine / Arms / Legs / Face / IK / Pole) derived from the bone hierarchy and mirror naming, gate `module-g7-g1` (suite 23/23).
 - **Pre-Flight Diagnostics** (`v0.2.0`): `ctrl_def.diagnose` checks zero-length `DEF` bones, missing `.L`/`.R` mirrored counterparts (with mirror enabled), name collisions with non-DEF bones and warns when parenting to `"DEF"` together with A.C.T.D. (Dependency Cycle risk).
 - **JSON/CSV export & user presets** (`v0.2.0`): `ctrl_def.export_json` / `ctrl_def.export_csv` export the CTRL→DEF registry with rig metadata; `ctrl_def.save_preset` / `ctrl_def.load_preset` save and reload your panel settings as `.json` files.
 - **Modular package** (`v0.2.0`): the source of truth is the `ctrl_def_mods\` module package, assembled into the installable monolith by `scripts/build_monolith.py` (build step, never edited by hand).
@@ -69,7 +76,7 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 
 ---
 
-## 📸 Demo Videos (v0.3.3)
+## 📸 Demo Videos (v0.5.0)
 
 | Video | Format | Content |
 |---|---|---|
@@ -140,16 +147,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_tests.ps1
 blender --background --factory-startup --python scripts/run_ctrl_def_tests.py
 ```
 
-The runners print the suite verdict: `VERDETTO: OK passati=<n> falliti=0 totale=<n>` (exit code 0) or `VERDETTO: FAIL ...` (exit code 1). Last local result on Blender 5.2.0 LTS: `passati=5 falliti=0 totale=5` (see `tests/test_out.txt`).
+The runners print the suite verdict: `VERDETTO: OK passati=<n> falliti=0 totale=<n>` (exit code 0) or `VERDETTO: FAIL ...` (exit code 1). Last local result on Blender 5.2.0 LTS: `passati=35 falliti=0 totale=35` (gate `auto-suite-35-g2`; see `tests/test_out.txt`).
 
 ---
 
 ## 📦 Installable ZIP
 
-The installable package for `v0.3.2` is the **modular package**: the generated monolith plus the `ctrl_def_mods\` module folder, with no wrapping folder:
+The installable package for `v0.5.0` is the **modular package**: the generated monolith plus the `ctrl_def_mods\` module folder, with no wrapping folder:
 
 ```
-def_controller_auto_v0.3.2.zip
+def_controller_auto_v0.5.0.zip
 ├── __init__.py              (generated monolith)
 ├── blender_manifest.toml
 ├── README.md
@@ -185,7 +192,10 @@ All operation ids live in the `ctrl_def.*` namespace and are also reachable via 
 | `ctrl_def.generate` | Generate Controllers | Generate controller bones in the CTRLS collection from selected DEF bones |
 | `ctrl_def.create_widget` | Create Widget | Assign the selected Bone Widget shape to the generated controllers |
 | `ctrl_def.bind_actd` | Bind DEF to CTRL (ACTD) | Bind DEF bones to generated controllers via A.C.T.D. (if enabled) or native COPY_TRANSFORMS constraints |
-| `ctrl_def.add_ik` | Add IK Target | Create an IK target bone and IK constraint on the selected 2-3 controller chain in Pose Mode |
+| `ctrl_def.add_ik` | Add IK Target | Create an IK target bone and IK constraint on the selected controller chain in Pose Mode (chain length 1-8, optional pole with BONE/MESH source via `ik_pole_source`) |
+| `ctrl_def.snap_ik_to_fk` | Snap IK to FK | Read the IK target matrix and write the resulting pose onto the registered FK controllers of the chain |
+| `ctrl_def.bake_ik_to_fk` | Bake IK to FK | Bake the IK pose onto the FK controllers frame range and remove the IK constraint at the end |
+| `ctrl_def.set_ik_target_space` | Set IK Target Space | Change the IK target space (World / Local / Object) with matrix compensation so the pose stays intact |
 | `ctrl_def.diagnose` | Diagnose Rig | Check selected DEF bones before generation (zero-length, missing mirror, collisions, cycles) |
 | `ctrl_def.apply_preset` | Apply Preset | Apply the selected preset to the panel settings |
 | `ctrl_def.export_json` | Export JSON | Export the active armature CTRL->DEF mapping to JSON |
@@ -193,18 +203,28 @@ All operation ids live in the `ctrl_def.*` namespace and are also reachable via 
 | `ctrl_def.save_preset` | Save Preset JSON | Save current panel settings to a JSON preset file |
 | `ctrl_def.load_preset` | Load Preset JSON | Load panel settings from a JSON preset file |
 | `ctrl_def.remove` | Remove Generated | Remove generated controllers, optional IK targets, and their constraints |
+| `ctrl_def.remap` | Remap Animation | Transfer controller poses from a source rig to a target rig using the DEF->CTRL mapping (free equivalent of the paid Remap module of competitors) |
+| `ctrl_def.auto_collection` | Auto Collection | Organize bones into the CTRLS/IK/DEF collections idempotently |
+| `ctrl_def.naming_doctor` | Naming Doctor | Batch rename DEF/CTRL bones, safely updating the registry, constraints, shape, IK and parents |
+| `ctrl_def.character_picker` | Character Picker | Build an automatic character picker with 7 groups (Root / Spine / Arms / Legs / Face / IK / Pole) derived from the hierarchy and mirror naming |
 
 ---
 
-## ⚠️ Known Limitations & Roadmap (post `v0.3.2`)
+## ⚠️ Known Limitations & Roadmap (post `v0.5.0`)
 
-- Rigger-oriented workflows support **FK** chains; IK is covered by the quick target on 2‑3 controller chains (`ctrl_def.add_ik`), while an automatic **IK/FK switch** is planned for `v2`.
+- Rigger-oriented workflows support **FK** chains; IK is covered by the quick target on 2‑3 controller chains (`ctrl_def.add_ik`), while **snap** and **bake IK→FK** (`ctrl_def.snap_ik_to_fk`, `ctrl_def.bake_ik_to_fk`) are already implemented; an automatic **IK/FK switch** (space switching) remains planned for `v2`.
 - Widgets rely on the optional **Bone Widget** extension (the plugin menu links directly to it); no built-in widget library.
 - Automated verification covers generation, naming, FK hierarchy, presets, A.C.T.D. binding, IK targets, pre-flight diagnostics, JSON/CSV export, presets and registry entries; the full UI still needs manual interactive verification.
 
 ---
 
 ## 📋 Changelog
+
+### `v0.4.0` — IK Chain & Space Switching
+- **IK chain length**: `ik_chain_length` (1–8) on the selected controller chain.
+- **Pole direction source**: `ik_pole_source` (BONE / MESH) picks the pole direction from the chain bend vector or from the mesh vertices.
+- **Space switching** (`v0.4.0`, Fase H **closed**, gate `space-h-g2`, suite 28/28): `ik_target_space` (World / Local / Object) with `ctrl_def.set_ik_target_space`, matrix compensation keeps the pose unchanged.
+- **Snap & Bake IK→FK**: `ctrl_def.snap_ik_to_fk` and `ctrl_def.bake_ik_to_fk` (gates `snap-f-g3` and `bake-g3`).
 
 ### `v0.3.0` — Auto Rig Layers (DEF / MCH / ORG / CTRL)
 - **Multi-Layer rigging pipeline**: `DEF -> ORG -> MCH -> CTRL`, `DEF -> MCH -> CTRL`, `MCH -> ORG`, `ORG -> CTRL` and `Custom` (previously only direct `DEF -> CTRL`).

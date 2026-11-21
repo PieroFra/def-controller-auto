@@ -1,14 +1,12 @@
 import sys, os
 # L'addon non modifica sys.path (policy Blender Extensions): la radice del repo
 # e la cartella dei test le aggiunge il runner, prima di ogni import.
-_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_TESTS_DIR)
-sys.path.append(_REPO_ROOT)
-sys.path.append(_TESTS_DIR)
+sys.path.append(r"C:\Users\checc\Desktop\BLENDER ADDONS\CTRL_DEF")
+sys.path.append(os.path.dirname(r"C:\Users\checc\Desktop\BLENDER ADDONS\CTRL_DEF\tests\test_ctrl_def.py"))
 import importlib.util
 
 # Carica e registra l'addon (entry point multi-modulo) prima di eseguire i test
-addon_path = os.path.join(_REPO_ROOT, "__init__.py")
+addon_path = os.path.join(r"C:\Users\checc\Desktop\BLENDER ADDONS\CTRL_DEF", "__init__.py")
 # Caricamento come package: senza submodule_search_locations __init__.py prende
 # il ramo degli import relativi e fallisce con ModuleNotFoundError 'ctrl_def_addon'.
 addon_spec = importlib.util.spec_from_file_location(
@@ -25,7 +23,7 @@ mod.register()
 passati = 0
 falliti = 0
 try:
-    spec = importlib.util.spec_from_file_location("test_ctrl_def", os.path.join(_TESTS_DIR, "test_ctrl_def.py"))
+    spec = importlib.util.spec_from_file_location("test_ctrl_def", r"C:\Users\checc\Desktop\BLENDER ADDONS\CTRL_DEF\tests\test_ctrl_def.py")
     tests = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tests)
     suites = [s.strip().lower() for s in os.environ.get("CTRLDEF_SUITES", "").split(",") if s.strip()]

@@ -180,6 +180,46 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
 
 ---
 
+## Ciclo `v0.4.0` — Roadmap upgrade IK-FK
+
+Estensione IK-FK dopo il ciclo multi-layer `v0.3.0`. Le fasi sotto sono
+indipendenti da quelle omonime F-I del ciclo `v0.3.0` (già storico) e
+ripartono da qui. Approccio: **un modulo alla volta**, gate a tag univoco.
+
+### Fase F — Snap IK→FK — **CHIUSA** (gate verde `snap-f-g3`, suite 14/14)
+- Nuovo operatore `ctrl_def.snap_ik_to_fk`: legge la matrice del target IK e
+  scrive le pose FK sui controller registrati della catena.
+- Rischio noto: ordine di valutazione e roll dei bone; gestione esplicita.
+- **Verifica:** test headless in `tests\test_ctrl_def.py`; gate a tag univoco.
+
+### Fase G — Bake IK→FK — **CHIUSA** (gate verde `bake-g3`, suite 14/14)
+- Bake via `bpy.ops.nla.bake` con `temp_override` + rimozione del constraint IK
+  al termine.
+- Verificare esplicitamente la compatibilità 4.2 / 5.2 (fallback, non controlli
+  di versione sparsi) e i test headless.
+- **Verifica:** test headless; gate a tag univoco.
+
+### Fase H — Space switching del target IK — **CHIUSA** (gate verde `space-h-g2`, suite 15/15)
+- Operatore `ctrl_def.set_ik_target_space` e proprietà `ik_target_space`
+  (enum `World / Local / Oggetto` su `CTRLDEF_PG_settings`) per lo space del
+  target IK, con compensazione matrice per non rompere la posa al cambio.
+- **Verifica:** test headless (posa invariante al cambio di space); gate a
+  tag univoco.
+
+### Fase I — Release `v0.4.0`
+- Bump versione (bl_info + `blender_manifest.toml`), CHANGELOG, ZIP in
+  `dist\` con `.sha256`, pubblicazione GitHub + Blender Extensions, GIF demo.
+- Subordinata al gate completo delle fasi F-H e alla passata del visualizzatore.
+
+---
+
+## Note tecniche (da ciclo v0.4.0)
+- Export FBX/glTF/deform-only: coperto da `bbone_to_bones` (runtime confermato).
+- Checker UV: non coperto da Intelligent UV; da valutare in futuro.
+- README IUV con ZIP 0.36.0 vs release 0.36.3: priorità bassa.
+
+---
+
 ## Regole trasversali (valide per ogni fase)
 - Un modulo alla volta: un intervento per modulo, poi build + verifica completa.
 - Non rinominare `bl_info` name, categoria Rigging, né id `ctrl_def.*`.
@@ -188,3 +228,81 @@ mantenendo l'estensione già approvata su Blender Extensions. Approccio:
   con i conteggi attesi e zero fallimenti.
 - Le verifiche interattive e le prove esplorative restano prove manuali
   separate: aggiornano la documentazione, non sostituiscono i test headless.
+
+---
+
+## Ciclo v0.5.0 — Roadmap diferenciazione e robustezza
+
+**PREMESSA.** Obiettivo del ciclo: feature che i competitor non fanno o vendono
+a pagamento (es. Auto-Rig Pro, ~$50 per il modulo Remap/Smart). Il punto forte
+di CTRL_DEF resta la capacità di generare controller a partire dai DEF
+esistenti di un rig già pronto, senza rifare il rig da zero. Ogni modulo segue
+la catena di montaggio a 5 anelli: codice (Red → patch → Green), gate a tag
+univoco, validazione (revisore + preset-compatible + audit-docs), probe UI con
+`flagged=0`, avanzamento solo se tutto è verde. Ogni modulo ha test headless
+prima e dopo, nessun commit intermedi, release unica finale a fine ciclo.
+
+### Moduli in ordine
+
+- **M1 — Rig Health Score (CHIUSA, gate module-a-g5, suite 17/17).** Modulo `ctrl_def.rig_score`: 30
+  controlli ripartiti in 5 categorie, voto sintetico in trentesimi (max /30).
+- **M2 — Remap DEF → CTRL (CHIUSA, gate module-b-g2, suite 18/18).** Modulo
+  `ctrl_def.remap`: mapping cross-rig dei controller su nuovi rig, import
+  azioni; equivale funzionalmente al modulo Remap venduto a $50.
+- **M3 — Manifest + Diff (CHIUSA, gate module-c3-g2, suite 19/19).** Snapshot JSON del registry, gerarchia,
+  constraint, IK e deform + comando diff con avviso di drift. Fattibilità ALTA.
+- **M4 — Auto-Organizzazione Collection (CHIUSA, gate module-d4-g3, suite 20/20).**
+  Assegnazione automatica di CTRLS / IK / DEF / MCH / ORG in base al registry e
+  alla profondità della catena.
+- **M5 — Handoff Animatore One-Click (CHIUSA, gate module-e5-g3, suite 21/21).**
+  Blocca MCH/ORG, nasconde DEF, mostra solo CTRLS, scala shape e widget per
+  l'animatore; restore reversibile con `ctrl_def.restore_rigger`.
+- **M6 — Naming Doctor Safe Rename (CHIUSA, gate module-f6-g3, suite 22/22).** Rinomina
+  batch di DEF/CTRL aggiornando registry, constraint, shape, target IK e parent
+  in modo sicuro.
+- **M7 — Character Picker auto (CHIUSA, gate module-g7-g1, suite 23/23).** Gruppi
+  Root / Spine / Braccia / Gambe / Faccia / IK / Pole derivati da parent chain e
+  mirror, esposti con `ctrl_def.character_picker`.
+- **M8 — Release `v0.5.0`.** Bump versione, CHANGELOG, ZIP + sha256,
+  pubblicazione GitHub + Blender Extensions, sync profilo. Subordinata al gate
+  completo di tutti i moduli e alla passata del visualizzatore.
+
+### Nota di chiusura ciclo v0.5.0
+
+Dopo i test funzionali il ciclo ha subito sei fix di chiusura, ognuno con il
+proprio gate: fix1-g1 (manifest_diff), fix2-g1 (rig_score), fix3-g1
+(auto_collection), fix4-g1 (character_picker), fix5-g1 (i18n) e fix6-g1
+(30esimo check rig_score). La suite finale passa completa con gate test-all-v1
+(28/28) e si chiude con il gate harden-g2 (hardening del registry: JSON dict e
+batch O(N), try/finally mode_set, guard bake_ok, compatibilità selezione
+4.2/5.2, pulizia collection vuote), suite 30/30 (`passati=30 falliti=0
+totale=30`). Il ciclo si estende con il gate opt-gui-g2: cache del registry
+O(1), fix del warning depsgraph e redesign ergonomico della GUI (v0.5.0),
+con il nuovo test `test_ui_and_depsgraph_optimization` a portare la suite
+a 31 test. Il gate coll-polish-g1 rifinisce le collection: creazione automatica
+della collection `DEF` in generate e `IK` in add_ik, handoff con hide sui bones
+`MCH`/`ORG`, pruning delle collection vuote su remove, operatore GUI
+`ctrl_def.character_picker` (suite 31/31, `VERIFY_OK passed=31 failed=0`).
+La suite si allinea a 35 test con il gate `auto-suite-35-g2`
+(`VERIFY_OK passed=35 failed=0`, run 20261119235946-ef1e59dd). Il gate
+`zero-leak-g1` chiude il ciclo (`VERIFY_OK | passed=35 | failed=0`,
+run 20261120001137-08332dab): fix del dependency cycle su `parent=ROOT` con
+pipeline multi-layer e pulizia dei datablock Mesh orfani dei widget.
+
+### Obiettivi trasversali
+
+- Aumentare la copertura dei test a ogni modulo aggiunto.
+- Automatizzare la catena di montaggio (meno passi manuali per anello).
+- Mantenere il codice facile da mantenere: nessun `except` muto, fallback
+  espliciti, i18n completa.
+- GUI pulita e semplice: l'addon deve essere usabile sia da esperti sia da
+  neofiti. Ogni nuovo operatore/proprieta' va esposto con etichette brevi,
+  raggruppamenti logici e tooltip chiari; evitare proliferazione di controlli
+  nel pannello principale. Il probe UI (flagged=0 in IT/EN) resta obbligatorio
+  a ogni modulo e la leggibilita' va verificata anche a vista dal visualizzatore.
+- Nota UI da ispezione (flagged=0): compattare la fascia di stato della
+  sezione 1 e isolare l'azione principale in fondo alla sezione 2; ridurre lo
+  scroll per i neofiti.
+- Azione principale (post Modulo A, probe flagged=0): dare enfasi visiva e
+  separazione al pulsante primario (box dedicato o separatore) per orientare
+  i neofiti, senza aggiungere controlli.

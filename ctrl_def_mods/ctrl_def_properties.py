@@ -1,6 +1,6 @@
 # Modulo proprieta': callback EnumProperty e PropertyGroup delle impostazioni.
 from bpy.props import (BoolProperty, EnumProperty, FloatProperty,
-                       StringProperty)
+                       IntProperty, StringProperty)
 from bpy.types import PropertyGroup
 
 from .ctrl_def_i18n import tr
@@ -157,5 +157,27 @@ class CTRLDEF_PG_settings(PropertyGroup):
     ik_create_pole: BoolProperty(
         name=tr("panel.ik_pole"), default=False,
         description=tr("tip.prop.ik_pole"))
-
+    ik_pole_source: EnumProperty(
+        name=tr("panel.ik_pole_source"),
+        description=tr("tip.prop.ik_pole_source"),
+        items=[
+            ("BONE", tr("pole.bone"), ""),
+            ("MESH", tr("pole.mesh"), ""),
+        ],
+        default="BONE")
+    # Lunghezza massima (in controller) di una catena IK generata con add_ik:
+    # limita quanti bone consecutivi entrano nella catena. Valore 1 = singolo
+    # controller (chain_count=1), fino a 8 per catene lunghe.
+    ik_chain_length: IntProperty(
+        name=tr("panel.ik_chain_length"), default=2, min=1, max=8,
+        description=tr("tip.prop.ik_chain_length"))
+    ik_target_space: EnumProperty(
+        name=tr("panel.ik_target_space"),
+        description=tr("tip.prop.ik_target_space"),
+        items=[
+            ("WORLD", tr("space.world"), ""),
+            ("LOCAL", tr("space.local"), ""),
+            ("OBJECT", tr("space.object"), ""),
+        ],
+        default="WORLD")
 

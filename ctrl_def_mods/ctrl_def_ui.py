@@ -33,12 +33,14 @@ def _section(layout, chiave, chiusa=False):
 
 
 def _draw_stats_box(layout, arm, stg):
-    """Conteggi DEF/CTRL; disegnati solo se c'e' un'armatura."""
-    layout.label(text=tr("panel.stats"), icon='INFO')
+    """Conteggi DEF/CTRL compattati su una riga sola."""
     data = _read_registry(arm)
     def_count = sum(1 for b in arm.data.bones if _is_def_bone(b, stg.prefix_def))
     ctrl_count = len(data)
-    layout.label(text=tr("stats.line") % (def_count, ctrl_count))
+    box = layout.box()
+    row = box.row(align=True)
+    row.label(text=tr("panel.stats"), icon='INFO')
+    row.label(text=tr("stats.line") % (def_count, ctrl_count))
 
 
 def _draw_preset_box(layout, stg):
@@ -94,7 +96,19 @@ def _draw_ik_box(layout, stg=None):
     if stg is not None:
         layout.prop(stg, "ik_align_world_y", text=tr("panel.ik_align_y"))
         layout.prop(stg, "ik_create_pole", text=tr("panel.ik_pole"))
+        if getattr(stg, "ik_create_pole", False):
+            layout.prop(stg, "ik_pole_source", text=tr("panel.ik_pole_source"))
+        layout.prop(stg, "ik_chain_length", text=tr("panel.ik_chain_length"),
+                    slider=True)
     layout.operator("ctrl_def.add_ik", text=tr("op.add_ik"), icon='CONSTRAINT')
+    row = layout.row(align=True)
+    row.operator("ctrl_def.snap_ik_to_fk", text=tr("op.snap_ik_to_fk"))
+    row.operator("ctrl_def.bake_ik_to_fk", text=tr("op.bake_ik_to_fk"))
+    if stg is not None:
+        row = layout.row(align=True)
+        row.prop(stg, "ik_target_space", text=tr("panel.ik_target_space"))
+        row.operator("ctrl_def.set_ik_target_space",
+                     text=tr("op.set_ik_target_space"))
 
 
 def _draw_export_box(layout):
@@ -107,14 +121,37 @@ def _draw_export_box(layout):
 
 
 def _draw_actions(layout):
-    """Pulsanti delle operazioni principali (genera e vincola)."""
-    layout.operator("ctrl_def.generate", text=tr("op.generate"), icon='BONE_DATA')
-    layout.operator("ctrl_def.bind_actd", text=tr("op.bind_actd"), icon='CONSTRAINT_BONE')
+    """Azione principale in evidenza, poi vincolo e azioni di contorno."""
+    col = layout.column(align=True)
+    sub = col.row(align=True)
+    sub.scale_y = 1.3
+    sub.operator("ctrl_def.generate", text=tr("op.generate"), icon='BONE_DATA')
+    col.operator("ctrl_def.bind_actd", text=tr("op.bind_actd"),
+                 icon='CONSTRAINT_BONE')
+    row = layout.row(align=True)
+    row.operator("ctrl_def.auto_collection", text=tr("op.auto_collection"),
+                 icon='GROUP_BONE')
+    row.operator("ctrl_def.character_picker", text=tr("op.character_picker"),
+                 icon='GROUP')
+    row.operator("ctrl_def.handoff_animator", text=tr("op.handoff_animator"),
+                 icon='HIDE_OFF')
+    row.operator("ctrl_def.restore_rigger", text=tr("op.restore_rigger"),
+                 icon='LOOP_BACK')
 
 
 def _draw_advanced_actions(layout):
-    """Diagnostica e pulizia dei controller generati."""
-    layout.operator("ctrl_def.diagnose", text=tr("op.diagnose"), icon='VIEWZOOM')
+    """Diagnostica, manifest, rimappatura e pulizia su righe compatte."""
+    row = layout.row(align=True)
+    row.operator("ctrl_def.diagnose", text=tr("op.diagnose"), icon='VIEWZOOM')
+    row.operator("ctrl_def.rig_score", text=tr("op.rig_score"), icon='SOLO_ON')
+    row = layout.row(align=True)
+    row.operator("ctrl_def.manifest", text=tr("op.manifest"), icon='FILE_TEXT')
+    row.operator("ctrl_def.manifest_diff", text=tr("op.manifest_diff"),
+                 icon='FILE_REFRESH')
+    row = layout.row(align=True)
+    row.operator("ctrl_def.remap", text=tr("op.remap"), icon='ARMATURE_DATA')
+    row.operator("ctrl_def.naming_doctor", text=tr("op.naming_doctor"),
+                 icon='SORTALPHA')
     layout.operator("ctrl_def.remove", text=tr("op.remove"), icon='TRASH')
 
 
