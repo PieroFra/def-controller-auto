@@ -3867,6 +3867,162 @@ def test_end_to_end_full_production_workflow():
         "remove ha toccato i DEF di partenza"
 
 
+def test_add_ik_pose_mode_and_single_tip():
+    # add_ik da Pose Mode con il solo controller di punta selezionato: la
+    # catena si ricostruisce dal registro (hand.L -> arm.L, forearm.L) e
+    # l'armatura resta in Pose Mode con il target IK creato.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.parent = "CHAIN"
+    arm_obj, arm_data = _new_armature("RigPoseTip")
+    bpy.ops.object.mode_set(mode='EDIT')
+    _build_chain(arm_data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    _seleziona_def(arm_obj, ("DEF_arm.L", "DEF_forearm.L", "DEF_hand.L"))
+    res = bpy.ops.ctrl_def.generate()
+    assert res == {'FINISHED'}, f"Generazione catena fallita: {res}"
+
+    mod = _addon_module()
+    mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+    bpy.context.view_layer.update()
+    # Solo il controller di punta resta selezionato
+    _seleziona_posa(arm_obj, None, False)
+    _seleziona_posa(arm_obj, ("hand.L",), True)
+    stg.ik_chain_length = 3
+    bpy.context.view_layer.update()
+    assert arm_obj.mode == 'POSE', \
+        f"Precondizione: armatura in {arm_obj.mode} invece di POSE"
+
+    res_ik = bpy.ops.ctrl_def.add_ik()
+    assert res_ik == {'FINISHED'}, f"add_ik fallito con status: {res_ik}"
+    bone_ik = arm_data.bones.get("IK_hand.L")
+    assert bone_ik is not None, \
+        "Target IK_hand.L non creato selezionando solo hand.L"
+    # Il vincolo vive sul primo anello della catena ricostruita
+    pb_arm = arm_obj.pose.bones.get("arm.L")
+    assert pb_arm is not None, "Controller arm.L assente dopo add_ik"
+    con = pb_arm.constraints.get("CTRL_DEF_IK")
+    assert con is not None, "Vincolo CTRL_DEF_IK assente su arm.L"
+    assert con.chain_count == 3, \
+        f"chain_count={con.chain_count} invece di 3"
+    assert arm_obj.mode == 'POSE', \
+        f"add_ik ha lasciato l'armatura in {arm_obj.mode} invece di POSE"
+    pb_ik = arm_obj.pose.bones.get("IK_hand.L")
+    assert pb_ik is not None, "Pose bone IK_hand.L assente dopo add_ik"
+    selezionato = getattr(pb_ik, "select", None)
+    if selezionato is None:
+        selezionato = pb_ik.bone.select
+    assert selezionato, "Il target IK_hand.L non e' selezionato dopo add_ik"
+
+
+def test_rig_score_ui_summary():
+    # Riepilogo Rig Score in sidebar: il parser e' tollerante, il box legge
+    # il report reale memorizzato sull'armatura e il pannello disegna pulito.
+    _reset()
+    mod = _addon_module()
+    # Il sottomodulo UI e' gia' importato da __init__: si legge da sys.modules.
+    ui_mod = sys.modules.get(mod.__name__ + ".ctrl_def_mods.ctrl_def_ui")
+    assert ui_mod is not None, "Sottomodulo ctrl_def_ui non caricato"
+    assert hasattr(ui_mod, "_parse_rig_score_summary"), \
+        "Helper _parse_rig_score_summary assente in ctrl_def_ui"
+
+    # 1) Input non validi: sempre None, mai eccezioni.
+    for grezzo in (None, 123, b"RIG_SCORE 1/30", "", "   ", "testo qualunque"):
+        assert ui_mod._parse_rig_score_summary(grezzo) is None, \
+            f"Input non valido accettato: {grezzo!r}"
+
+    # 2) Report reale prodotto dall'operatore.
+    arm_obj, arm_data = _new_armature("RigScoreUI")
+    bpy.ops.object.mode_set(mode='EDIT')
+    eb = _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    eb.use_deform = True
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+
+    res = bpy.ops.ctrl_def.rig_score()
+    assert res == {'FINISHED'}, f"rig_score non FINISHED: {res}"
+    report = arm_obj.get("_ctrl_def_last_rig_score")
+    assert report, "rig_score non ha memorizzato il report sull'armatura"
+
+    riepilogo = ui_mod._parse_rig_score_summary(report)
+    assert riepilogo is not None, f"Report reale non riconosciuto: {report!r}"
+    voto = re.search(r"(\d+)\s*/\s*30", report)
+    assert voto is not None, f"Voto /30 assente nel report: {report!r}"
+    assert riepilogo["score"] == int(voto.group(1)), \
+        f"Voto estratto errato: {riepilogo['score']} != {voto.group(1)}"
+    assert riepilogo["total"] == 30, f"Totale errato: {riepilogo['total']}"
+    assert riepilogo["score_text"] == "%s/30" % voto.group(1)
+    # Le 5 categorie escono tutte, nell'ordine canonico del report.
+    attese = ("STRUTTURA", "CONTROLLI", "DEFORMAZIONE", "MANUTENIBILITA",
+              "CONSEGNA")
+    assert tuple(nome for nome, _p in riepilogo["categories"]) == attese, \
+        f"Categorie mancanti o disordinate: {riepilogo['categories']!r}"
+    for _nome, punteggio_cat in riepilogo["categories"]:
+        assert re.match(r"^\d+/\d+$", punteggio_cat), \
+            f"Punteggio categoria malformato: {punteggio_cat!r}"
+    # Le voci FAIL estratte coincidono con quelle del report.
+    fail_report = re.findall(r"(\d+\.\d+)\s+FAIL", report)
+    fail_estratte = [voce.split()[0] for voce in riepilogo["fails"]]
+    assert fail_estratte == fail_report, \
+        f"FAIL estratti {fail_estratte} != report {fail_report}"
+    # Ogni FAIL con dettaglio conserva il formato "codice <dettaglio>".
+    for voce in riepilogo["fails"]:
+        assert re.match(r"^\d+\.\d+( <.+>)?$", voce), \
+            f"Voce FAIL malformata: {voce!r}"
+
+    # 3) Stringa corrotta con un voto ma senza categorie: None.
+    assert ui_mod._parse_rig_score_summary(
+        "RIG_SCORE 9/30 | roba senza categorie") is None, \
+        "Stringa corrotta accettata dal parser"
+
+    # 4) Il pannello disegna il box senza errori con l'armatura attiva.
+    registro = {"labels": [], "props": [], "operators": [], "panels": []}
+
+    class _SegnapostoOperatoreUI:
+        """Ritorno di operator(): serve solo l'attributo url in _draw_widget_box."""
+
+    class _FakeLayoutUI:
+        """UILayout finto che registra le chiamate del draw (headless)."""
+
+        def __init__(self):
+            self.scale_y = 1.0
+
+        def label(self, text="", icon="NONE"):
+            registro["labels"].append(text)
+
+        def prop(self, data, name, text="", slider=False):
+            registro["props"].append(name)
+
+        def operator(self, idname, text="", icon="NONE"):
+            registro["operators"].append(idname)
+            return _SegnapostoOperatoreUI()
+
+        def row(self, align=False):
+            return _FakeLayoutUI()
+
+        def column(self, align=False):
+            return _FakeLayoutUI()
+
+        def box(self):
+            return _FakeLayoutUI()
+
+        def panel(self, chiave, default_closed=False):
+            registro["panels"].append(chiave)
+            return (_FakeLayoutUI(), _FakeLayoutUI())
+
+    finto = type("FintoPanelUI", (), {"layout": _FakeLayoutUI()})()
+    mod.CTRLDEF_PT_panel.draw(finto, bpy.context)
+    atteso = "Rig Score: %s/30" % voto.group(1)
+    assert atteso in registro["labels"], \
+        f"Riga voto non disegnata: {registro['labels']!r}"
+    # Le categorie del report compaiono nelle etichette del box.
+    for nome, punteggio_cat in riepilogo["categories"]:
+        etichetta = "%s %s" % (nome, punteggio_cat)
+        assert etichetta in registro["labels"], \
+            f"Categoria non disegnata: {etichetta!r}"
+
+
 if __name__ == "__main__":
     _registra_addon_se_mancante()
     _TEST = (
@@ -3905,6 +4061,8 @@ if __name__ == "__main__":
         test_export_json_csv_and_user_presets_roundtrip,
         test_diagnose_preflight_edge_cases,
         test_end_to_end_full_production_workflow,
+        test_rig_score_ui_summary,
+        test_add_ik_pose_mode_and_single_tip,
     )
     _passati = 0
     _falliti = 0

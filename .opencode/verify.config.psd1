@@ -6,7 +6,7 @@
     Build         = 'scripts\build_monolith.py'
     Runner        = '.opencode\scripts\run_tests.ps1'
     RunnerArgs    = @()
-    ExpectedTotal = 35
+    ExpectedTotal = 37
     DiffPaths     = @('__init__.py', 'ctrl_def_mods')
     IndexOutput   = '.opencode\INDEX.md'
 }

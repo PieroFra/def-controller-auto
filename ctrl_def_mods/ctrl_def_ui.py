@@ -1,4 +1,6 @@
 # Modulo UI: pannello della sidebar e helper di disegno.
+import re
+
 import bpy
 from bpy.types import Panel
 
@@ -139,11 +141,93 @@ def _draw_actions(layout):
                  icon='LOOP_BACK')
 
 
-def _draw_advanced_actions(layout):
+# Ordine canonico delle categorie nel report di ctrl_def.rig_score.
+_RIG_SCORE_CATEGORIE = ("STRUTTURA", "CONTROLLI", "DEFORMAZIONE",
+                        "MANUTENIBILITA", "CONSEGNA")
+
+
+def _parse_rig_score_summary(raw):
+    """Riepilogo del report `_ctrl_def_last_rig_score`, None se non valido.
+
+    Formato atteso (output di ctrl_def.rig_score):
+        "RIG_SCORE X/30 | STRUTTURA a/6 | 1.1 OK; ... ; CONTROLLI b/7 | ..."
+    Tollerante: None, valori non-stringa, testo senza voto o senza categorie
+    restituiscono None, cosi' la UI non disegna un box vuoto o incoerente.
+    """
+    if not isinstance(raw, str):
+        return None
+    testo = raw.strip()
+    if not testo:
+        return None
+    testo_upper = testo.upper()
+    if "RIG_SCORE" not in testo_upper:
+        return None
+    # Voto globale X/30: prima quello dichiarato subito dopo RIG_SCORE.
+    voto = re.search(r"RIG_SCORE\s+(\d+)\s*/\s*(\d+)", testo_upper)
+    if voto is None:
+        voto = re.search(r"(\d+)\s*/\s*(\d+)", testo_upper)
+    if voto is None:
+        return None
+    punti, totale = int(voto.group(1)), int(voto.group(2))
+    if totale <= 0 or punti < 0 or punti > totale:
+        return None
+    # Coppie (categoria, punteggio) nell'ordine canonico del report.
+    categorie = []
+    for nome in _RIG_SCORE_CATEGORIE:
+        trovata = re.search(r"\b%s\s+(\d+)\s*/\s*(\d+)" % nome, testo_upper)
+        if trovata is not None:
+            categorie.append((nome, "%s/%s" % (trovata.group(1),
+                                               trovata.group(2))))
+    if not categorie:
+        return None
+    # Voci FAIL con l'eventuale dettaglio tra parentesi angolari.
+    fail = []
+    for match in re.finditer(r"(\d+\.\d+)\s+FAIL\s*(?:<([^>]*)>)?",
+                             testo, re.IGNORECASE):
+        codice = match.group(1)
+        dettaglio = (match.group(2) or "").strip()
+        fail.append("%s <%s>" % (codice, dettaglio) if dettaglio else codice)
+    return {
+        "score": punti,
+        "total": totale,
+        "score_text": "%d/%d" % (punti, totale),
+        "categories": categorie,
+        "fails": fail,
+    }
+
+
+def _draw_rig_score_box(layout, riepilogo):
+    """Box compatto con voto, categorie e fail dell'ultimo rig_score."""
+    box = layout.box()
+    riga = box.row(align=True)
+    icona = 'CHECKMARK' if riepilogo["score"] == riepilogo["total"] else 'INFO'
+    riga.label(text="Rig Score: %s" % riepilogo["score_text"], icon=icona)
+    categorie = riepilogo["categories"]
+    # Due categorie per riga: al massimo 3 righe, nessun overflow laterale.
+    for inizio in range(0, len(categorie), 2):
+        riga = box.row(align=True)
+        for nome, punteggio in categorie[inizio:inizio + 2]:
+            riga.label(text="%s %s" % (nome, punteggio))
+    # Fino a 3 FAIL, con dettaglio accorciato per restare nella sidebar.
+    for voce in riepilogo["fails"][:3]:
+        dettaglio = voce if len(voce) <= 34 else voce[:31] + "..."
+        box.row(align=True).label(text="FAIL %s" % dettaglio, icon='ERROR')
+
+
+def _draw_advanced_actions(layout, arm=None):
     """Diagnostica, manifest, rimappatura e pulizia su righe compatte."""
     row = layout.row(align=True)
     row.operator("ctrl_def.diagnose", text=tr("op.diagnose"), icon='VIEWZOOM')
     row.operator("ctrl_def.rig_score", text=tr("op.rig_score"), icon='SOLO_ON')
+    # Ultimo Rig Score letto dall'armatura attiva: ignorato se manca o e' rotto.
+    if arm is not None and getattr(arm, "type", None) == 'ARMATURE':
+        try:
+            grezzo = arm.get("_ctrl_def_last_rig_score")
+        except (AttributeError, TypeError):
+            grezzo = None
+        riepilogo = _parse_rig_score_summary(grezzo)
+        if riepilogo is not None:
+            _draw_rig_score_box(layout, riepilogo)
     row = layout.row(align=True)
     row.operator("ctrl_def.manifest", text=tr("op.manifest"), icon='FILE_TEXT')
     row.operator("ctrl_def.manifest_diff", text=tr("op.manifest_diff"),
@@ -194,7 +278,7 @@ class CTRLDEF_PT_panel(Panel):
         if corpo is not None:
             _draw_ik_box(corpo, stg)
             _draw_export_box(corpo)
-            _draw_advanced_actions(corpo)
+            _draw_advanced_actions(corpo, arm)
         # Guida rapida in fondo (chiusa)
         _draw_guide(layout)
 

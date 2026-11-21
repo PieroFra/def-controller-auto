@@ -1986,6 +1986,9 @@ class CTRLDEF_OT_add_ik(Operator):
         if arm is None or arm.type != "ARMATURE":
             self.report({'ERROR'}, tr("msg.no_armature"))
             return {'CANCELLED'}
+        # Modalita' di partenza: chi lancia l'operatore da Pose Mode deve
+        # ritrovarsi in Pose Mode, con i target appena creati selezionati.
+        modo_iniziale = arm.mode
         # La selezione dei bone si legge solo in Pose Mode
         _ensure_armature_mode(context, arm, 'POSE')
         # La selezione scritta dai test/pannelli va consolidata prima della lettura
@@ -1993,6 +1996,28 @@ class CTRLDEF_OT_add_ik(Operator):
         stg = getattr(context.scene, "ctrl_def_settings", None)
         limite = getattr(stg, "ik_chain_length", 2) if stg is not None else 2
         catene = _selected_ctrl_chains(arm)
+        if catene and limite >= 2 and all(len(c) == 1 for c in catene):
+            # Con il solo controller di punta selezionato la catena si
+            # ricostruisce risalendo i genitori registrati finche' il limite
+            # lo consente: ["hand.L"] -> ["upperarm.L", "forearm.L", "hand.L"].
+            registro = _read_registry(arm)
+            estese = []
+            for catena in catene:
+                nuova = list(catena)
+                pb = arm.pose.bones.get(nuova[0])
+                while pb is not None and len(nuova) < limite:
+                    genitore = pb.parent
+                    if genitore is None or genitore.name not in registro:
+                        break
+                    nuova.insert(0, genitore.name)
+                    pb = genitore
+                # Deduplica: stessa catena o catena gia' contenuta come coda
+                # di una piu' lunga (caso di punte selezionate in parallelo).
+                if any(nuova[-len(k):] == k for k in estese):
+                    continue
+                estese = [k for k in estese if nuova[-len(k):] != k]
+                estese.append(nuova)
+            catene = estese
         if not catene:
             # Avviso chiaro quando i bone selezionati formano una catena
             # piu' lunga del limite impostato: non si scarta in silenzio.
@@ -2015,7 +2040,17 @@ class CTRLDEF_OT_add_ik(Operator):
             creati += _add_ik_target_chain(arm, "CTRLS", catena, pole=pole,
                                            align_world_y=align_world_y,
                                            pole_source=pole_source)
-        _ensure_armature_mode(context, arm, 'OBJECT')
+        if modo_iniziale == 'POSE':
+            # Si resta in Pose Mode e si selezionano i target creati, cosi'
+            # l'utente puo' subito posare la catena senza cambiare modalita'.
+            _ensure_armature_mode(context, arm, 'POSE')
+            for catena in catene:
+                pb_ik = arm.pose.bones.get("IK_" + catena[-1])
+                if pb_ik is not None:
+                    _set_pose_bone_selected(pb_ik, True)
+            context.view_layer.update()
+        else:
+            _ensure_armature_mode(context, arm, 'OBJECT')
         self.report({'INFO'}, tr("msg.ik_created") + ": " + str(creati))
         return {'FINISHED'}
 
