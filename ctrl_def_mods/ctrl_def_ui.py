@@ -208,18 +208,17 @@ def _draw_rig_score_box(layout, riepilogo):
     icona = 'CHECKMARK' if riepilogo["score"] == riepilogo["total"] else 'INFO'
     riga.label(text="Rig Score: %s" % riepilogo["score_text"], icon=icona)
     categorie = riepilogo["categories"]
-    # Due categorie per riga: al massimo 3 righe, nessun overflow laterale.
-    for inizio in range(0, len(categorie), 2):
-        riga = box.row(align=True)
-        for nome, punteggio in categorie[inizio:inizio + 2]:
-            riga.label(text="%s %s" % (nome, punteggio))
+    # Una categoria per riga: i nomi lunghi (DEFORMAZIONE, MANUTENIBILITA)
+    # non vanno mai troncati nella sidebar stretta.
+    for nome, punteggio in categorie:
+        box.row(align=True).label(text="%s %s" % (nome, punteggio))
     # Fino a 3 FAIL, con dettaglio accorciato per restare nella sidebar.
     for voce in riepilogo["fails"][:3]:
         dettaglio = voce if len(voce) <= 34 else voce[:31] + "..."
         box.row(align=True).label(text="FAIL %s" % dettaglio, icon='ERROR')
 
 
-def _draw_advanced_actions(layout, arm=None):
+def _draw_advanced_actions(layout, arm=None, stg=None):
     """Diagnostica, manifest, rimappatura e pulizia su righe compatte."""
     row = layout.row(align=True)
     row.operator("ctrl_def.diagnose", text=tr("op.diagnose"), icon='VIEWZOOM')
@@ -237,18 +236,25 @@ def _draw_advanced_actions(layout, arm=None):
     row.operator("ctrl_def.manifest", text=tr("op.manifest"), icon='FILE_TEXT')
     row.operator("ctrl_def.manifest_diff", text=tr("op.manifest_diff"),
                  icon='FILE_REFRESH')
+    # Mappa JSON del Naming Doctor: senza il campo il pulsante inviava sempre
+    # "{}" e rispondeva "nessun rename da applicare". Il campo resta vuoto o
+    # "{}" di default e il pulsante gli passa il valore corrente.
+    if stg is not None:
+        layout.prop(stg, "naming_rename_map", text=tr("panel.rename_map_json"))
     row = layout.row(align=True)
     row.operator("ctrl_def.remap", text=tr("op.remap"), icon='ARMATURE_DATA')
-    row.operator("ctrl_def.naming_doctor", text=tr("op.naming_doctor"),
-                 icon='SORTALPHA')
+    pulsante = row.operator("ctrl_def.naming_doctor", text=tr("op.naming_doctor"),
+                            icon='SORTALPHA')
+    if stg is not None:
+        pulsante.rename_map_json = stg.naming_rename_map
     layout.operator("ctrl_def.remove", text=tr("op.remove"), icon='TRASH')
 
 
 def _draw_guide(layout):
-    """Guida rapida in 5 passi, chiusa di default."""
+    """Guida rapida in 7 passi, chiusa di default."""
     corpo = _section(layout, "sec.guide", chiusa=True)
     if corpo is not None:
-        for passo in range(1, 6):
+        for passo in range(1, 8):
             corpo.label(text=tr("guide.%d" % passo))
 
 
@@ -285,7 +291,7 @@ class CTRLDEF_PT_panel(Panel):
         if corpo is not None:
             _draw_ik_box(corpo, stg)
             _draw_export_box(corpo)
-            _draw_advanced_actions(corpo, arm)
+            _draw_advanced_actions(corpo, arm, stg)
         # Guida rapida in fondo (chiusa)
         _draw_guide(layout)
 

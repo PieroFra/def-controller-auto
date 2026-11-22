@@ -3,6 +3,20 @@
 Tutte le modifiche notevoli di questo progetto verranno documentate in questo
 file. Il formato si basa su [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.2] - 2026-11-22
+
+### Fixed
+- Rig Score ignores not-applicable checks, so a healthy rig reaches the full score.
+- Rig Score false positives: DEF prefixes matched case-insensitively, use_deform judged on real weights, driver targets and pose bone custom properties count as references.
+- Naming Doctor works with a mesh active and has a sidebar field for the rename map.
+- Rig Score box shows one category per row, no truncated labels.
+
+### Changed
+- Sidebar guide extended to 7 steps.
+
+### Tests
+- 40 tests green.
+
 ## [0.5.1] - 2026-11-22
 
 ### Fixed

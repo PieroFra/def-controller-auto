@@ -121,6 +121,12 @@ class CTRLDEF_PG_settings(PropertyGroup):
     # editabile: il nome non e' vincolato a un elenco chiuso di widget.
     widget_name: StringProperty(
         name=tr("panel.shape"), default="Circle")
+    # Mappa JSON del Naming Doctor, editabile dalla sidebar (Avanzate). Non
+    # entra in _SETTINGS_KEYS, quindi i preset salvati non la contengono e
+    # restano compatibili. Default "{}" = nessuna rinomina da applicare.
+    naming_rename_map: StringProperty(
+        name=tr("panel.rename_map_json"), default="{}",
+        description=tr("tip.prop.rename_map_json"))
     scale: FloatProperty(
         name=tr("panel.scale"), default=1.0, min=0.01,
         description=tr("tip.prop.scale"))

@@ -196,7 +196,8 @@ def test_registration_elements():
                    "preset.default", "preset.biped", "preset.root", "preset.face",
                    "op.diagnose", "msg.diag_ok", "msg.diag_issues",
                    "sec.setup", "sec.controller", "sec.advanced", "sec.guide",
-                   "guide.1", "guide.2", "guide.3", "guide.4", "guide.5"):
+                   "guide.1", "guide.2", "guide.3", "guide.4", "guide.5",
+                   "guide.6", "guide.7"):
         for lingua in ("it", "en"):
             assert chiave in mod._I18N[lingua], f"Chiave {chiave!r} assente in _I18N[{lingua!r}]"
     assert mod.tr("msg.no_registered", "it") == "Nessun controller registrato", \
@@ -216,17 +217,39 @@ def test_registration_elements():
         f"sec.setup IT inatteso: {mod.tr('sec.setup', 'it')!r}"
     assert mod.tr("sec.guide", "en") == "Guide", \
         f"sec.guide EN inatteso: {mod.tr('sec.guide', 'en')!r}"
-    for passo in ("guide.1", "guide.2", "guide.3", "guide.4", "guide.5"):
+    for passo in ("guide.1", "guide.2", "guide.3", "guide.4", "guide.5",
+                  "guide.6", "guide.7"):
         for lingua in ("it", "en"):
             testo = mod.tr(passo, lingua)
             assert testo and testo != passo, \
                 f"Chiave {passo!r} senza traduzione in {lingua!r}: {testo!r}"
             assert len(testo) <= 28, \
                 f"Testo di {passo!r} in {lingua!r} troppo lungo ({len(testo)}): {testo!r}"
-    assert mod.tr("guide.1", "it") == "1 Armatura con bone DEF_", \
-        f"guide.1 IT inatteso: {mod.tr('guide.1', 'it')!r}"
-    assert mod.tr("guide.4", "en") == "4 Bind DEF to CTRL", \
-        f"guide.4 EN inatteso: {mod.tr('guide.4', 'en')!r}"
+    # Verifica stringa esatta delle sette voci della guida, in IT e in EN
+    guide_it = {
+        "guide.1": "1 Armatura con bone DEF_",
+        "guide.2": "2 Scegli widget e scala",
+        "guide.3": "3 Genera i controller",
+        "guide.4": "4 Vincola DEF ai CTRL (ACTD)",
+        "guide.5": "5 IK e pole in Pose Mode",
+        "guide.6": "6 Controlla con Rig Score",
+        "guide.7": "7 Handoff o export",
+    }
+    guide_en = {
+        "guide.1": "1 Armature with DEF_ bones",
+        "guide.2": "2 Pick widget and size",
+        "guide.3": "3 Generate controllers",
+        "guide.4": "4 Bind DEF to CTRL (ACTD)",
+        "guide.5": "5 IK and pole in Pose Mode",
+        "guide.6": "6 Check with Rig Score",
+        "guide.7": "7 Handoff or export",
+    }
+    for passo, atteso in guide_it.items():
+        assert mod.tr(passo, "it") == atteso, \
+            f"{passo} IT inatteso: {mod.tr(passo, 'it')!r} invece di {atteso!r}"
+    for passo, atteso in guide_en.items():
+        assert mod.tr(passo, "en") == atteso, \
+            f"{passo} EN inatteso: {mod.tr(passo, 'en')!r} invece di {atteso!r}"
     # Callback delle EnumProperty: con items dinamici il default e' l'indice 0,
     # quindi la prima voce deve restare quella storica di default.
     assert mod._items_parent(None, None)[0][0] == "CHAIN", \
@@ -2224,6 +2247,23 @@ def test_rig_health_score():
     assert re.search(r"\d+\s*/\s*30", testo), \
         f"Voto numerico /30 non trovato nel report: {testo!r}"
 
+    # Regola del punteggio: solo i FAIL tolgono punti, i check NON TROVATO
+    # compaiono come "n/d" e non abbassano il voto. Il totale resta 30.
+    report_mem = arm_obj.get("_ctrl_def_last_rig_score")
+    assert report_mem, "rig_score non ha memorizzato il report sull'armatura"
+    assert "n/d" in report_mem, \
+        f"Nessuna voce NON TROVATO resa come n/d nel report: {report_mem!r}"
+    assert "NON TROVATO" not in report_mem, \
+        f"Lo stato NON TROVATO deve comparire come n/d: {report_mem!r}"
+    voto = re.search(r"RIG_SCORE\s+(\d+)/(\d+)", report_mem)
+    assert voto is not None, f"Voto RIG_SCORE X/30 assente: {report_mem!r}"
+    assert int(voto.group(2)) == 30, \
+        f"Totale diverso da 30: {voto.group(2)} <- {report_mem!r}"
+    n_fail = len(re.findall(r"\d+\.\d+\s+FAIL\b", report_mem))
+    assert int(voto.group(1)) == 30 - n_fail, \
+        f"Punteggio {voto.group(1)} incoerente: 30 - {n_fail} FAIL " \
+        f"= {30 - n_fail} <- {report_mem!r}"
+
     varianti = {
         "STRUTTURA": ("STRUTTURA",),
         "CONTROLLI": ("CONTROLLI",),
@@ -2349,7 +2389,7 @@ def test_rig_score_no_false_fail():
 
     def dettaglio_codice(codice):
         trovato = re.search(
-            r"%s\s+(OK|FAIL|NON TROVATO)\s*(?:<([^>]*)>)?" % re.escape(codice),
+            r"%s\s+(OK|FAIL|NON TROVATO|n/d)\s*(?:<([^>]*)>)?" % re.escape(codice),
             report)
         assert trovato is not None, f"Check {codice} assente dal report: {report!r}"
         return trovato.group(1), (trovato.group(2) or "")
@@ -2376,6 +2416,165 @@ def test_rig_score_no_false_fail():
     assert voto is not None, f"Voto /30 assente nel report: {report!r}"
     assert int(voto.group(1)) >= 26, \
         f"Punteggio troppo basso per un rig corretto: {voto.group(1)}/30 <- {report!r}"
+
+
+def test_rig_checks_igiene_pesi_e_riferimenti():
+    # Check 1.4 (igiene del naming), 1.2 (pesi/deform) e 1.5 (bone referenziati
+    # da driver e custom property delle pose bone) con i criteri nuovi.
+    _reset()
+    stg = bpy.context.scene.ctrl_def_settings
+    stg.prefix_def = "DEF_"
+    stg.prefix_ctrl = ""
+
+    arm_obj, arm_data = _new_armature("RigChecksIgiene")
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    # --- 1.4: nomi sani (prefisso senza distinzione di maiuscole) ---
+    for nome in ("DEF_Pelvis", "def_pelvis", "DEF_braccio.L"):
+        _add_bone(arm_data, nome, (0, 0, 0), (0, 0, 0.2)).use_deform = False
+    # --- 1.4: difetti di igiene, ognuno deve comparire nel dettaglio ---
+    _add_bone(arm_data, "DEF Spazio", (0, 0, 0.3), (0, 0, 0.5)).use_deform = False
+    _add_bone(arm_data, "DEF__doppio", (0, 0, 0.6), (0, 0, 0.8)).use_deform = False
+    bordo = _add_bone(arm_data, "DEF_bordo", (0, 0, 0.9), (0, 0, 1.1))
+    bordo.name = "DEF_bordo "  # spazio al bordo: preservato da Blender
+    bordo.use_deform = False
+    _add_bone(arm_data, "DEFsbagliato", (0, 0, 1.2), (0, 0, 1.4)).use_deform = False
+
+    # --- 1.2: pesi contro use_deform ---
+    # Pesato ma con deform spento: rompe la deformazione.
+    _add_bone(arm_data, "DEF_off_pesato", (0, 0, 1.5), (0, 0, 1.7)).use_deform = False
+    # Deform acceso e nessun peso, fuori dai bone previsti: difetto.
+    _add_bone(arm_data, "CTRL_deform_orfano", (0, 0, 1.8), (0, 0, 2.0)).use_deform = True
+    # DEF e organici senza pesi non sono difetti: i pesi arrivano dopo.
+    _add_bone(arm_data, "DEF_deform_senza_pesi", (0, 0, 2.1), (0, 0, 2.3)).use_deform = True
+    _add_bone(arm_data, "ORG_deform_organico", (0, 0, 2.4), (0, 0, 2.6)).use_deform = True
+
+    # --- 1.5: osso di switch referenziato fuori dai constraint ---
+    _add_bone(arm_data, "SWITCH_POWER_BODY", (0, 0, 2.7), (0, 0, 2.9)).use_deform = False
+    _add_bone(arm_data, "SWITCH_DRIVER_PATH", (0, 0, 3.0), (0, 0, 3.2)).use_deform = False
+    _add_bone(arm_data, "SWITCH_CP_PROP", (0, 0, 3.3), (0, 0, 3.5)).use_deform = False
+    _add_bone(arm_data, "MORTO_leaf", (0, 0, 3.6), (0, 0, 3.8)).use_deform = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Mesh armaturata: solo DEF_off_pesato ha un peso reale > 0.
+    bpy.ops.mesh.primitive_cube_add(size=0.5, location=(0.0, 0.0, 0.5))
+    mesh_obj = bpy.context.active_object
+    mesh_obj.name = "MeshRigChecks"
+    modificatore = mesh_obj.modifiers.new("Armature", 'ARMATURE')
+    modificatore.object = arm_obj
+    gruppo = mesh_obj.vertex_groups.new(name="DEF_off_pesato")
+    gruppo.add(list(range(len(mesh_obj.data.vertices))), 1.0, 'REPLACE')
+
+    # Driver: una variabile punta SWITCH_POWER_BODY, un data_path punta
+    # SWITCH_DRIVER_PATH. Una custom property nomina SWITCH_CP_PROP.
+    fcurve = arm_obj.driver_add("rotation_euler", 0)
+    variabile = fcurve.driver.variables.new()
+    variabile.name = "switch"
+    variabile.type = 'TRANSFORMS'
+    variabile.targets[0].id = arm_obj
+    variabile.targets[0].bone_target = "SWITCH_POWER_BODY"
+    variabile.targets[0].transform_type = 'LOC_X'
+    variabile.targets[0].transform_space = 'LOCAL_SPACE'
+    arm_obj.driver_add('pose.bones["SWITCH_DRIVER_PATH"].location', 0)
+    arm_obj.pose.bones["SWITCH_CP_PROP"]["switch_target"] = "SWITCH_CP_PROP"
+
+    ops = importlib.import_module("ctrl_def_addon.ctrl_def_mods.ctrl_def_operators")
+
+    # 1.4: sani OK, i quattro nomi sporchi esatti nel dettaglio.
+    stato_14, det_14 = ops._rig_check_1_4(arm_obj, bpy.context)
+    assert stato_14 == "FAIL", f"check 1.4 non segnala i nomi sporchi: {stato_14}"
+    assert sorted(det_14.split("; ")) == sorted(
+        ["DEF Spazio", "DEF__doppio", "DEF_bordo ", "DEFsbagliato"]), \
+        f"Check 1.4: difetti di igiene inattesi: {det_14!r}"
+    for sano in ("DEF_Pelvis", "def_pelvis", "DEF_braccio.L"):
+        assert sano not in det_14, f"Check 1.4 boccia il nome sano {sano}: {det_14!r}"
+
+    # 1.2: esattamente i due casi che rompono la deformazione.
+    stato_12, det_12 = ops._rig_check_1_2(arm_obj, bpy.context)
+    assert stato_12 == "FAIL", f"check 1.2 non segnala i pesi rotti: {stato_12}"
+    assert sorted(det_12.split("; ")) == sorted(
+        ["DEF_off_pesato", "CTRL_deform_orfano"]), \
+        f"Check 1.2: casi di deform inattesi: {det_12!r}"
+    for previsto in ("DEF_deform_senza_pesi", "ORG_deform_organico"):
+        assert previsto not in det_12, \
+            f"Check 1.2 boccia il bone previsto {previsto}: {det_12!r}"
+
+    # 1.5: si parte da un'armatura fresca. I bone di igiene creati per 1.4 e
+    # 1.2 sono foglie non referenziate e verrebbero segnalati come morti,
+    # rompendo l'assert esatto sul solo MORTO_leaf.
+    bpy.context.view_layer.objects.active = arm_obj
+    arm_obj.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    for eb in list(arm_data.edit_bones):
+        if eb.name not in ("SWITCH_POWER_BODY", "SWITCH_DRIVER_PATH",
+                           "SWITCH_CP_PROP", "MORTO_leaf"):
+            arm_data.edit_bones.remove(eb)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # 1.5: gli switch referenziati restano vivi, solo MORTO_leaf e' morto.
+    stato_15, det_15 = ops._rig_check_1_5(arm_obj, bpy.context)
+    assert stato_15 == "FAIL", f"check 1.5 non segnala il bone morto: {stato_15}"
+    assert det_15 == "MORTO_leaf", \
+        f"Check 1.5: osso morto errato {det_15!r} (atteso solo MORTO_leaf)"
+
+
+def test_rig_score_box_una_categoria_per_riga():
+    # Il box Rig Score disegna una categoria per riga: nessun nome troncato
+    # su due colonne, e al massimo 3 voci FAIL.
+    _reset()
+    mod = _addon_module()
+    ui_mod = sys.modules.get(mod.__name__ + ".ctrl_def_mods.ctrl_def_ui")
+    assert ui_mod is not None, "Sottomodulo ctrl_def_ui non caricato"
+
+    class _RigaFinta:
+        """Riga finta che registra le etichette disegnate."""
+
+        def __init__(self, righe):
+            self.etichette = []
+            righe.append(self)
+
+        def label(self, text="", icon="NONE"):
+            self.etichette.append(text)
+
+    class _LayoutFinto:
+        """UILayout finto: ogni row() e' una riga registrata a parte."""
+
+        def __init__(self):
+            self.righe = []
+
+        def box(self):
+            return self
+
+        def row(self, align=False):
+            return _RigaFinta(self.righe)
+
+    riepilogo = {
+        "score": 27,
+        "total": 30,
+        "score_text": "27/30",
+        "categories": [("STRUTTURA", "6/6"), ("CONTROLLI", "7/7"),
+                       ("DEFORMAZIONE", "5/7"), ("MANUTENIBILITA", "4/4"),
+                       ("CONSEGNA", "5/6")],
+        "fails": ["3.1 <spalla>", "3.2 <gomito>", "1.2 <peso>",
+                  "2.4 <shape>", "5.2 <limite>"],
+    }
+    layout = _LayoutFinto()
+    ui_mod._draw_rig_score_box(layout, riepilogo)
+
+    # Una sola etichetta per riga: mai due colonne nella sidebar.
+    assert all(len(riga.etichette) == 1 for riga in layout.righe), \
+        f"Righe con piu' etichette (troncamento a due colonne): " \
+        f"{[r.etichette for r in layout.righe]!r}"
+    etichette = [riga.etichette[0] for riga in layout.righe]
+    assert etichette[0] == "Rig Score: 27/30", \
+        f"Riga del voto errata: {etichette[0]!r}"
+    for nome, punteggio in riepilogo["categories"]:
+        attesa = "%s %s" % (nome, punteggio)
+        assert attesa in etichette, \
+            f"Categoria non disegnata per intero: {attesa!r} in {etichette!r}"
+    fail = [voce for voce in etichette if voce.startswith("FAIL ")]
+    assert len(fail) == 3, \
+        f"Attese al massimo 3 voci FAIL, disegnate {len(fail)}: {fail!r}"
 
 
 def test_remap_animazione():
@@ -4013,6 +4212,15 @@ def test_rig_score_ui_summary():
 
     finto = type("FintoPanelUI", (), {"layout": _FakeLayoutUI()})()
     mod.CTRLDEF_PT_panel.draw(finto, bpy.context)
+    # Naming Doctor: la sidebar espone la mappa JSON nell'area Avanzate
+    # (default "{}", nessun preset la contiene) e il pulsante la riceve.
+    assert "naming_rename_map" in registro["props"], \
+        f"Campo mappa JSON del Naming Doctor assente dalla sidebar: " \
+        f"{registro['props']!r}"
+    assert bpy.context.scene.ctrl_def_settings.naming_rename_map == "{}", \
+        "Il campo mappa JSON del Naming Doctor non parte da \"{}\""
+    assert "ctrl_def.naming_doctor" in registro["operators"], \
+        "Pulsante Naming Doctor non disegnato nella sidebar"
     atteso = "Rig Score: %s/30" % voto.group(1)
     assert atteso in registro["labels"], \
         f"Riga voto non disegnata: {registro['labels']!r}"
@@ -4032,6 +4240,9 @@ def test_rig_score_e_naming_doctor_su_mesh_attiva():
     bpy.ops.object.mode_set(mode='EDIT')
     eb = _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
     eb.use_deform = True
+    # Controller con registry: serve al secondo caso del naming doctor.
+    eb_ctrl = _add_bone(arm_data, "arm.L", (0.0, 0.0, 1.35), (0.0, 0.0, 1.5))
+    eb_ctrl.use_deform = False
     bpy.ops.object.mode_set(mode='OBJECT')
 
     # Mesh agganciata all'armatura solo dal modificatore: e' l'unico legame.
@@ -4056,9 +4267,31 @@ def test_rig_score_e_naming_doctor_su_mesh_attiva():
     assert report, \
         "rig_score non ha memorizzato il report sull'armatura risolta dal modificatore"
 
-    res_nd = bpy.ops.ctrl_def.naming_doctor()
+    # Prima: mappa vuota passata esplicitamente. Senza argomento Blender
+    # riuserebbe l'ultimo rename_map_json lasciato da un test precedente.
+    res_nd = bpy.ops.ctrl_def.naming_doctor(rename_map_json="{}")
     assert res_nd == {'FINISHED'}, \
         f"naming_doctor non FINISHED con mesh attiva: {res_nd}"
+
+    # Seconda: mappa vera non vuota, il rename deve avvenire davvero e il
+    # registry (controller -> DEF) deve seguire i nuovi nomi.
+    mod = _addon_module()
+    assert mod is not None, "Modulo dell'addon non disponibile per il naming doctor"
+    mod._write_registry(arm_obj, {"arm.L": {"def": "DEF_arm.L"}})
+    mappa = {"arm.L": "arm_ctrl.L", "DEF_arm.L": "DEF_arm_new.L"}
+    res_nd2 = bpy.ops.ctrl_def.naming_doctor(rename_map_json=json.dumps(mappa))
+    assert res_nd2 == {'FINISHED'}, \
+        f"naming_doctor non FINISHED con mappa non vuota: {res_nd2}"
+    assert "arm_ctrl.L" in arm_data.bones, \
+        f"Controller non rinominato: {[b.name for b in arm_data.bones]!r}"
+    assert "DEF_arm_new.L" in arm_data.bones, \
+        f"DEF non rinominato: {[b.name for b in arm_data.bones]!r}"
+    for vecchio in ("arm.L", "DEF_arm.L"):
+        assert vecchio not in arm_data.bones, \
+            f"Vecchio nome ancora presente dopo la rinomina: {vecchio}"
+    reg_nd = mod._read_registry(arm_obj)
+    assert reg_nd == {"arm_ctrl.L": {"def": "DEF_arm_new.L"}}, \
+        f"Registry non aggiornato dopo la rinomina: {reg_nd!r}"
 
 
 if __name__ == "__main__":
@@ -4082,6 +4315,8 @@ if __name__ == "__main__":
         test_ik_pole_mesh_source,
         test_rig_health_score,
         test_rig_score_no_false_fail,
+        test_rig_checks_igiene_pesi_e_riferimenti,
+        test_rig_score_box_una_categoria_per_riga,
         test_remap_animazione,
         test_manifest_diff,
         test_manifest_diff_edge_cases,

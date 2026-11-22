@@ -2,6 +2,7 @@
 # export della mappa CTRL->DEF e preset utente JSON.
 import csv
 import json
+import re
 import sys
 
 import bpy
@@ -548,6 +549,38 @@ def _rig_meshes(arm):
         return []
 
 
+def _rig_weighted_groups(arm):
+    """Nomi dei vertex group con almeno un peso > 0 sulle mesh dell'armatura.
+
+    Restituisce (nomi, errore). Un gruppo vuoto non conta come "pesato":
+    la sola presenza del gruppo non prova che il bone deformi davvero.
+    """
+    pesati = set()
+    try:
+        for mesh in _rig_meshes(arm):
+            nomi_per_indice = {vg.index: vg.name for vg in mesh.vertex_groups}
+            for vertice in mesh.data.vertices:
+                for assegnazione in vertice.groups:
+                    if assegnazione.weight > 0.0:
+                        nome_vg = nomi_per_indice.get(assegnazione.group)
+                        if nome_vg:
+                            pesati.add(nome_vg)
+    except Exception as exc:
+        return pesati, str(exc)
+    return pesati, None
+
+
+# Riferimento a un bone dentro un data_path: pose.bones["nome"] o bones["nome"].
+_RIG_BONE_REF_RE = re.compile(r'(?:pose\.)?bones\["([^"]+)"\]')
+
+
+def _rig_bone_names_in_path(percorso):
+    """Nomi di bone citati in un data_path RNA (es. pose.bones["X"].location)."""
+    if not isinstance(percorso, str) or not percorso:
+        return []
+    return _RIG_BONE_REF_RE.findall(percorso)
+
+
 def _rig_score_constraints(arm):
     """Elenco (pose_bone, constraint) di tutti i constraint dell'armatura.
 
@@ -624,12 +657,22 @@ def _rig_check_1_2(arm, context):
     try:
         prefix_def, prefix_ctrl, stg = _rig_prefixes(arm, context)
         bones = _rig_bones(arm)
+        pesati, err = _rig_weighted_groups(arm)
+        if err is not None:
+            return (FAIL, "errore lettura pesi: %s" % err)
+        prefisso = (prefix_def or "DEF_").upper()
         bad_deform = []
         for b in bones:
-            is_def = _is_def_bone(b, prefix_def)
-            if is_def and not b.use_deform:
+            ha_pesi = b.name in pesati
+            # Pesato ma con deform spento: rompe la deformazione del mesh.
+            if ha_pesi and not b.use_deform:
                 bad_deform.append(b.name)
-            if (not is_def) and b.use_deform:
+                continue
+            # Deform acceso senza pesi: e' un difetto solo fuori dai bone
+            # previsti per deformare (DEF e meccanici arrivano ai pesi dopo).
+            if b.use_deform and not ha_pesi:
+                if b.name.upper().startswith(prefisso) or _rig_is_mechanical(b.name):
+                    continue
                 bad_deform.append(b.name)
         return (OK if not bad_deform else FAIL, "; ".join(bad_deform[:5]))
     except Exception as exc:
@@ -673,11 +716,20 @@ def _rig_check_1_4(arm, context):
     try:
         prefix_def, prefix_ctrl, stg = _rig_prefixes(arm, context)
         bones = _rig_bones(arm)
-        bad_names = [b.name for b in bones
-                     if " " in b.name or "__" in b.name or b.name != b.name.strip()]
+        # Igiene del naming: nessuno spazio (nemmeno ai bordi), nessun doppio
+        # underscore e nome non vuoto.
+        bad_names = []
         for b in bones:
-            if b.name.startswith("DEF") and not b.name.startswith(prefix_def):
-                bad_names.append(b.name)
+            nome = b.name
+            if not nome or " " in nome or "__" in nome or nome != nome.strip():
+                bad_names.append(nome)
+                continue
+            # Il prefisso DEF e' confrontato senza distinzione di maiuscole:
+            # DEF_Pelvis con prefisso DEF_ e' un nome sano.
+            prefisso = (prefix_def or "DEF_").upper()
+            if nome.upper().startswith("DEF") and \
+                    not nome.upper().startswith(prefisso):
+                bad_names.append(nome)
         return (OK if not bad_names else FAIL, "; ".join(bad_names[:5]))
     except Exception as exc:
         return (FAIL, "errore: %s" % exc)
@@ -710,6 +762,39 @@ def _rig_check_1_5(arm, context):
                 referenziati.update(registry.keys())
         except Exception as exc:
             return (FAIL, "errore lettura registry: %s" % exc)
+        # Driver: variabili che puntano a un bone (bone_target o data_path) e
+        # il data_path del driver stesso. Un osso di switch animato non e' morto.
+        drivers, derr = _rig_score_drivers(arm)
+        if derr is not None:
+            return (FAIL, "errore lettura driver: %s" % derr)
+        for canale in drivers:
+            # animation_data.drivers elenca FCurve, non Driver: il data_path
+            # del canale pilotato sta sulla FCurve, le variabili (bone_target
+            # compreso) stanno su fcurve.driver (Driver non espone data_path).
+            referenziati.update(
+                _rig_bone_names_in_path(getattr(canale, "data_path", "")))
+            driver = getattr(canale, "driver", None)
+            if driver is None:
+                continue
+            for variabile in getattr(driver, "variables", ()) or ():
+                referenziati.update(_rig_bone_names_in_path(
+                    getattr(variabile, "data_path", "")))
+                for bersaglio in getattr(variabile, "targets", ()) or ():
+                    nome_bone = getattr(bersaglio, "bone_target", "")
+                    if isinstance(nome_bone, str) and nome_bone:
+                        referenziati.add(nome_bone)
+                    referenziati.update(_rig_bone_names_in_path(
+                        getattr(bersaglio, "data_path", "")))
+        # Custom property delle pose bone: il nome di un bone scritto in una
+        # stringa (tipico degli switch) conta come riferimento.
+        for pbone in arm.pose.bones:
+            for chiave in pbone.keys():
+                valore = pbone.get(chiave)
+                if isinstance(valore, str) and valore:
+                    referenziati.add(valore)
+                elif isinstance(valore, (list, tuple)):
+                    referenziati.update(
+                        voce for voce in valore if isinstance(voce, str) and voce)
         dead = []
         for b in bones:
             # ORG_/MCH_/MECH_ sono meccanici: foglia per definizione, non morti.
@@ -1329,6 +1414,7 @@ def _rig_check_5_6(arm, context):
 
 def _rig_health_score(arm, context):
     """Esegue i controlli misurati e restituisce (report, punteggio)."""
+    FAIL, NT = "FAIL", "NON TROVATO"
     cat = {"STRUTTURA": [], "CONTROLLI": [], "DEFORMAZIONE": [],
            "MANUTENIBILITA": [], "CONSEGNA": []}
 
@@ -1376,19 +1462,22 @@ def _rig_health_score(arm, context):
     add("CONSEGNA", "5.6", *_rig_check_5_6(arm, context))
 
     # ---------- Report ----------
+    # Un check NON TROVATO non e' un difetto del rig: non toglie punti e nel
+    # report compare come "n/d". Solo i FAIL abbassano il voto; il totale resta
+    # sempre di 30 voci, cosi' il formato RIG_SCORE X/30 non cambia.
     punteggio = 0
     righe_cat = []
     for nome_cat in ("STRUTTURA", "CONTROLLI", "DEFORMAZIONE",
                      "MANUTENIBILITA", "CONSEGNA"):
         voci = cat[nome_cat]
-        pt = sum(1 for (_, s, _) in voci if s == "OK")
+        pt = sum(1 for (_, s, _) in voci if s != FAIL)
         punteggio += pt
         maxpt = len(voci)
         dettagli = []
         for (codice, stato, det) in voci:
             # Ogni voce compare nel report, anche quando e' OK: cosi' il
             # verdetto per codice resta leggibile e verificabile.
-            etichetta = "%s %s" % (codice, stato)
+            etichetta = "%s %s" % (codice, "n/d" if stato == NT else stato)
             if det:
                 etichetta += " <%s>" % det
             dettagli.append(etichetta)
@@ -3421,6 +3510,53 @@ def _nd_update_constraints(arm_obj, rename_map):
                 con.pole_subtarget = rename_map[con.pole_subtarget]
 
 
+class _nd_temp_active_armature:
+    """Rende l'armatura attiva e selezionata, ripristinando stato originale.
+
+    Serve quando l'oggetto attivo del context e' la mesh armaturata (caso
+    naming_doctor): senza questo `bpy.ops.object.mode_set` lavora sull'oggetto
+    precedente e fallisce. All'uscita l'attivo e la selezione tornano com'erano.
+    """
+
+    def __init__(self, arm_obj):
+        self.arm_obj = arm_obj
+        self.prev_active = None
+        self.prev_selected = []
+
+    def __enter__(self):
+        view_layer = bpy.context.view_layer
+        self.prev_active = view_layer.objects.active
+        self.prev_selected = [o for o in view_layer.objects if o.select_get()]
+        for obj in self.prev_selected:
+            try:
+                obj.select_set(False)
+            except RuntimeError:
+                pass
+        view_layer.objects.active = self.arm_obj
+        try:
+            self.arm_obj.select_set(True)
+        except RuntimeError:
+            pass
+        return self.arm_obj
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.arm_obj.select_set(False)
+        except RuntimeError:
+            pass
+        view_layer = bpy.context.view_layer
+        for obj in self.prev_selected:
+            try:
+                obj.select_set(True)
+            except RuntimeError:
+                pass
+        try:
+            view_layer.objects.active = self.prev_active
+        except (RuntimeError, TypeError):
+            pass
+        return False
+
+
 def _nd_update_parents(arm_obj, rename_map, captured_parents=None):
     """Verifica i parent dopo la rinomina e ripristina quelli persi.
 
@@ -3458,46 +3594,48 @@ def _nd_update_parents(arm_obj, rename_map, captured_parents=None):
     # Riparazione in edit mode: Bone.parent e' read-only in object/pose mode.
     # La modalita' di partenza viene ripristinata comunque nel finally.
     modo_iniziale = getattr(arm_obj, "mode", None) or 'POSE'
-    try:
+    # L'armatura deve essere attiva e selezionata per entrare in EDIT mode.
+    with _nd_temp_active_armature(arm_obj):
         try:
-            _ensure_armature_mode(bpy.context, arm_obj, 'EDIT')
-        except (AttributeError, RuntimeError, TypeError):
-            # Nessun cambio di modalita' possibile: nessuna riparazione.
-            return None
-        try:
-            ebones = arm_obj.data.edit_bones
-            # Ripristina parent persi a partire dalla mappa catturata.
-            if isinstance(captured_parents, dict):
-                for old_child, old_parent in captured_parents.items():
-                    new_child_name = rename_map.get(old_child, old_child)
-                    if new_child_name not in ebones:
-                        continue
-                    echild = ebones[new_child_name]
-                    if echild.parent is not None:
-                        continue
-                    if old_parent is None:
-                        echild.parent = None
-                        continue
-                    new_parent_name = rename_map.get(old_parent, old_parent)
-                    if new_parent_name in ebones:
-                        echild.parent = ebones[new_parent_name]
-            # Ripara parent stale (nome vecchio) residui.
-            for ename in list(ebones.keys()):
-                ebone = ebones[ename]
-                if ebone.parent is not None and ebone.parent.name in rename_map:
-                    new_parent_name = rename_map[ebone.parent.name]
-                    if new_parent_name in ebones:
-                        ebone.parent = ebones[new_parent_name]
-        except (AttributeError, RuntimeError, TypeError, KeyError):
-            # Edit bones non coerenti (rinomina parziale): si prosegue, il
-            # chiamante ripristina comunque lo stato finale.
-            pass
-    finally:
-        # Ripristino garantito della modalita' trovata all'ingresso.
-        try:
-            _ensure_armature_mode(bpy.context, arm_obj, modo_iniziale)
-        except (AttributeError, RuntimeError, TypeError):
-            pass
+            try:
+                _ensure_armature_mode(bpy.context, arm_obj, 'EDIT')
+            except (AttributeError, RuntimeError, TypeError):
+                # Nessun cambio di modalita' possibile: nessuna riparazione.
+                return None
+            try:
+                ebones = arm_obj.data.edit_bones
+                # Ripristina parent persi a partire dalla mappa catturata.
+                if isinstance(captured_parents, dict):
+                    for old_child, old_parent in captured_parents.items():
+                        new_child_name = rename_map.get(old_child, old_child)
+                        if new_child_name not in ebones:
+                            continue
+                        echild = ebones[new_child_name]
+                        if echild.parent is not None:
+                            continue
+                        if old_parent is None:
+                            echild.parent = None
+                            continue
+                        new_parent_name = rename_map.get(old_parent, old_parent)
+                        if new_parent_name in ebones:
+                            echild.parent = ebones[new_parent_name]
+                # Ripara parent stale (nome vecchio) residui.
+                for ename in list(ebones.keys()):
+                    ebone = ebones[ename]
+                    if ebone.parent is not None and ebone.parent.name in rename_map:
+                        new_parent_name = rename_map[ebone.parent.name]
+                        if new_parent_name in ebones:
+                            ebone.parent = ebones[new_parent_name]
+            except (AttributeError, RuntimeError, TypeError, KeyError):
+                # Edit bones non coerenti (rinomina parziale): si prosegue, il
+                # chiamante ripristina comunque lo stato finale.
+                pass
+        finally:
+            # Ripristino garantito della modalita' trovata all'ingresso.
+            try:
+                _ensure_armature_mode(bpy.context, arm_obj, modo_iniziale)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
     return None
 
 
@@ -3543,53 +3681,56 @@ def naming_doctor(arm_obj, rename_map):
     # Modalita' di partenza da ripristinare comunque a fine operazione.
     modo_iniziale = getattr(arm_obj, "mode", None) or 'OBJECT'
     esito = {'CANCELLED'}
-    try:
+    # L'armatura puo' non essere l'attivo (mesh armaturata): la rendiamo
+    # attiva e selezionata per i cambi di modo, ripristinando tutto all'uscita.
+    with _nd_temp_active_armature(arm_obj):
         try:
-            _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
-        except (AttributeError, RuntimeError, TypeError):
-            return {'CANCELLED'}
-        shapes = _nd_preserve_shapes(arm_obj, rename_map)
-        # Cattura i parent prima della rinomina per poterli ripristinare.
-        parents_before = {}
-        try:
-            for b in arm_obj.data.bones:
-                parents_before[b.name] = (b.parent.name if b.parent is not None else None)
-        except (AttributeError, ReferenceError, RuntimeError):
+            try:
+                _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+            except (AttributeError, RuntimeError, TypeError):
+                return {'CANCELLED'}
+            shapes = _nd_preserve_shapes(arm_obj, rename_map)
+            # Cattura i parent prima della rinomina per poterli ripristinare.
             parents_before = {}
-        try:
-            _ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
-            _nd_rename_bones(arm_obj, rename_map)
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            return {'CANCELLED'}
-        try:
-            _nd_update_registry(arm_obj, rename_map)
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            return {'CANCELLED'}
-        try:
-            _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
-            _nd_update_constraints(arm_obj, rename_map)
-        except (AttributeError, RuntimeError, TypeError):
-            return {'CANCELLED'}
-        # I constraint puntano ai bone per nome: l'update del depsgraph deve
-        # avvenire solo DOPO aver riallineato i subtarget, altrimenti la
-        # valutazione usa i nomi vecchi e fallisce sulla relazione.
-        bpy.context.view_layer.update()
-        try:
-            _nd_update_parents(arm_obj, rename_map, parents_before)
-        except (AttributeError, RuntimeError, TypeError, KeyError):
-            return {'CANCELLED'}
-        try:
-            _nd_preserve_shapes(arm_obj, rename_map, shapes)
-        except (AttributeError, RuntimeError, TypeError):
-            return {'CANCELLED'}
-        esito = {'FINISHED'}
-        return esito
-    finally:
-        # Ripristino garantito: la modalita' non resta appesa a POSE/OBJECT.
-        try:
-            _ensure_armature_mode(bpy.context, arm_obj, modo_iniziale)
-        except (AttributeError, RuntimeError, TypeError):
-            pass
+            try:
+                for b in arm_obj.data.bones:
+                    parents_before[b.name] = (b.parent.name if b.parent is not None else None)
+            except (AttributeError, ReferenceError, RuntimeError):
+                parents_before = {}
+            try:
+                _ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
+                _nd_rename_bones(arm_obj, rename_map)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                return {'CANCELLED'}
+            try:
+                _nd_update_registry(arm_obj, rename_map)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                return {'CANCELLED'}
+            try:
+                _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+                _nd_update_constraints(arm_obj, rename_map)
+            except (AttributeError, RuntimeError, TypeError):
+                return {'CANCELLED'}
+            # I constraint puntano ai bone per nome: l'update del depsgraph deve
+            # avvenire solo DOPO aver riallineato i subtarget, altrimenti la
+            # valutazione usa i nomi vecchi e fallisce sulla relazione.
+            bpy.context.view_layer.update()
+            try:
+                _nd_update_parents(arm_obj, rename_map, parents_before)
+            except (AttributeError, RuntimeError, TypeError, KeyError):
+                return {'CANCELLED'}
+            try:
+                _nd_preserve_shapes(arm_obj, rename_map, shapes)
+            except (AttributeError, RuntimeError, TypeError):
+                return {'CANCELLED'}
+            esito = {'FINISHED'}
+            return esito
+        finally:
+            # Ripristino garantito: la modalita' non resta appesa a POSE/OBJECT.
+            try:
+                _ensure_armature_mode(bpy.context, arm_obj, modo_iniziale)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
 
 
 class CTRLDEF_OT_naming_doctor(Operator):
