@@ -4,19 +4,19 @@
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
-[![Version](https://img.shields.io/badge/version-0.5.0-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
+[![Version](https://img.shields.io/badge/version-0.5.2-brightgreen)](https://github.com/PieroFra/def-controller-auto/releases)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Blender Extensions](https://img.shields.io/badge/Blender_Extensions-ctrl--def-orange?logo=blender)](https://extensions.blender.org/add-ons/ctrl-def/)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.5.0`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
+Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.5.2`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
 
 | | |
 |---|---|
 | **Compatibility** | **Blender 4.2 LTS — 5.2+** |
 | **Category** | **Rigging** |
-| **Version** | **0.5.0** |
+| **Version** | **0.5.2** |
 | **Author** | **Pierfrancesco Diodato** |
 | **Type** | Add-on (installable ZIP or folder) |
 | **License** | GPL-3.0-or-later |
@@ -76,18 +76,14 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 
 ---
 
-## 📸 Demo Videos (v0.5.0)
+## 📸 Demo Videos (v0.5.2)
 
 | Video | Format | Content |
 |---|---|---|
-| `ctrldef_033_16x9.mp4` | 1920x1080 (16:9) | Generate Controllers from a `DEF_` chain, IK target on World `+Y` with automatic pole |
-| `ctrldef_033_9x16.mp4` | 1080x1920 (9:16) | Same workflow, vertical cut for Reels and Shorts |
+| `CTRL_DEF_v0.5_trailer_v2_16x9.mp4` | 1920x1080 (16:9), 44 s, no audio | [Trailer 16:9](https://github.com/PieroFra/def-controller-auto/releases/download/v0.5.1/CTRL_DEF_v0.5_trailer_v2_16x9.mp4) |
+| `CTRL_DEF_v0.5_short_v2_9x16.mp4` | 1080x1920 (9:16), 37 s, voiceover | [Short 9:16](https://github.com/PieroFra/def-controller-auto/releases/download/v0.5.1/CTRL_DEF_v0.5_short_v2_9x16.mp4) |
 
-https://github.com/user-attachments/assets/9d0838c9-7527-42fc-b88b-c362dce0fd2e
-
-**[Vertical 9:16 cut](https://github.com/PieroFra/def-controller-auto/releases/download/v0.3.3/ctrldef_033_9x16.mp4)**
-
-Both files are attached to the [v0.3.3 GitHub Release](https://github.com/PieroFra/def-controller-auto/releases/tag/v0.3.3).
+Both files are attached to the [GitHub Release](https://github.com/PieroFra/def-controller-auto/releases/tag/v0.5.2).
 
 ---
 
@@ -153,10 +149,10 @@ The runners print the suite verdict: `VERDETTO: OK passati=<n> falliti=0 totale=
 
 ## 📦 Installable ZIP
 
-The installable package for `v0.5.0` is the **modular package**: the generated monolith plus the `ctrl_def_mods\` module folder, with no wrapping folder:
+The installable package for `v0.5.2` is the **modular package**: the generated monolith plus the `ctrl_def_mods\` module folder, with no wrapping folder:
 
 ```
-def_controller_auto_v0.5.0.zip
+ctrl_def-0.5.2.zip
 ├── __init__.py              (generated monolith)
 ├── blender_manifest.toml
 ├── README.md
@@ -175,7 +171,7 @@ def_controller_auto_v0.5.0.zip
 
 The release ZIP contains the English `README.md` only (the Italian version lives in the repository); each archive is accompanied by its `.sha256` checksum file in `dist\`.
 
-**Alternatively:** download the package directly (with its `.sha256` checksum file) from the [Releases](https://github.com/PieroFra/def-controller-auto/releases) page.
+**Alternatively:** download [`ctrl_def-0.5.2.zip`](https://github.com/PieroFra/def-controller-auto/releases/download/v0.5.2/ctrl_def-0.5.2.zip) (with its `.sha256` checksum file) from the [v0.5.2 Release](https://github.com/PieroFra/def-controller-auto/releases/tag/v0.5.2). Installing from **Blender Extensions** remains the recommended way.
 
 **Official page on Blender Extensions:** <https://extensions.blender.org/add-ons/ctrl-def/> — the extension is approved and installable directly from Blender 4.2+: *Edit > Preferences > Get Extensions*, search **"DEF Controller Auto"** and click *Install*.
 
@@ -210,7 +206,7 @@ All operation ids live in the `ctrl_def.*` namespace and are also reachable via 
 
 ---
 
-## ⚠️ Known Limitations & Roadmap (post `v0.5.0`)
+## ⚠️ Known Limitations & Roadmap (post `v0.5.2`)
 
 - Rigger-oriented workflows support **FK** chains; IK is covered by the quick target on 2‑3 controller chains (`ctrl_def.add_ik`), while **snap** and **bake IK→FK** (`ctrl_def.snap_ik_to_fk`, `ctrl_def.bake_ik_to_fk`) are already implemented; an automatic **IK/FK switch** (space switching) remains planned for `v2`.
 - Widgets rely on the optional **Bone Widget** extension (the plugin menu links directly to it); no built-in widget library.
