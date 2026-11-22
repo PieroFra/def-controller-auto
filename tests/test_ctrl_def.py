@@ -4023,6 +4023,44 @@ def test_rig_score_ui_summary():
             f"Categoria non disegnata: {etichetta!r}"
 
 
+def test_rig_score_e_naming_doctor_su_mesh_attiva():
+    # Con la mesh armaturata attiva (nessuna armatura selezionata) rig_score e
+    # naming_doctor devono risolvere l'armatura come il pannello: modificatore
+    # ARMATURE, poi parent, poi armatura selezionata. Prima fallivano CANCELLED.
+    _reset()
+    arm_obj, arm_data = _new_armature("RigSuMeshAttiva")
+    bpy.ops.object.mode_set(mode='EDIT')
+    eb = _add_bone(arm_data, "DEF_arm.L", (0.0, 0.0, 1.0), (0.0, 0.0, 1.5))
+    eb.use_deform = True
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Mesh agganciata all'armatura solo dal modificatore: e' l'unico legame.
+    mesh_data = bpy.data.meshes.new("MeshSuArmatura")
+    mesh_obj = bpy.data.objects.new("MeshSuArmatura", mesh_data)
+    bpy.context.scene.collection.objects.link(mesh_obj)
+    mesh_data.from_pydata([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
+                           (1.0, 0.0, 1.0), (0.0, 0.0, 1.0)], [], [(0, 1, 2, 3)])
+    mesh_data.update()
+    modificatore = mesh_obj.modifiers.new(name="Armature", type='ARMATURE')
+    modificatore.object = arm_obj
+
+    # Attiva la sole mesh: l'armatura non e' ne' attiva ne' selezionata.
+    arm_obj.select_set(False)
+    bpy.context.view_layer.objects.active = mesh_obj
+    mesh_obj.select_set(True)
+
+    res_score = bpy.ops.ctrl_def.rig_score()
+    assert res_score == {'FINISHED'}, \
+        f"rig_score non FINISHED con mesh attiva: {res_score}"
+    report = arm_obj.get("_ctrl_def_last_rig_score")
+    assert report, \
+        "rig_score non ha memorizzato il report sull'armatura risolta dal modificatore"
+
+    res_nd = bpy.ops.ctrl_def.naming_doctor()
+    assert res_nd == {'FINISHED'}, \
+        f"naming_doctor non FINISHED con mesh attiva: {res_nd}"
+
+
 if __name__ == "__main__":
     _registra_addon_se_mancante()
     _TEST = (
@@ -4062,6 +4100,7 @@ if __name__ == "__main__":
         test_diagnose_preflight_edge_cases,
         test_end_to_end_full_production_workflow,
         test_rig_score_ui_summary,
+        test_rig_score_e_naming_doctor_su_mesh_attiva,
         test_add_ik_pose_mode_and_single_tip,
     )
     _passati = 0

@@ -3,6 +3,13 @@
 Tutte le modifiche notevoli di questo progetto verranno documentate in questo
 file. Il formato si basa su [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.1] - 2026-11-22
+
+### Fixed
+- Rig Score box and Naming Doctor work when a mesh is active (armature resolved via modifier/parent/selection).
+- Empty rename_map is a successful no-op.
+- Hardening of `_resolve_armature`/`_nd_validate_map`/mode restore.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added

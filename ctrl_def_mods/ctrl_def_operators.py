@@ -1408,6 +1408,52 @@ def _rig_health_score(arm, context):
     return report, punteggio
 
 
+def _resolve_armature(context):
+    """Trova l'armatura di riferimento anche quando l'attivo e' la mesh armaturata.
+
+    Implementazione unica condivisa con la UI (ctrl_def_ui la importa da qui,
+    niente duplicati). Ordine: armatura attiva, modificatore ARMATURE dell'attivo,
+    parent diretto, infine qualsiasi armatura selezionata. Le letture RNA sono
+    protette: con un oggetto non piu' valido (cancellato, file in caricamento) si
+    passa al criterio successivo invece di propagare l'eccezione al chiamante.
+    """
+    try:
+        attivo = getattr(context, "active_object", None)
+    except (AttributeError, ReferenceError, RuntimeError):
+        # Contesto RNA non leggibile: si ripiega solo sugli oggetti selezionati.
+        attivo = None
+    if attivo is not None:
+        try:
+            if getattr(attivo, "type", None) == 'ARMATURE':
+                return attivo
+            # 1 · Modificatore ARMATURE sull'oggetto attivo (caso piu' comune).
+            for modificatore in getattr(attivo, "modifiers", ()) or ():
+                if getattr(modificatore, "type", None) == 'ARMATURE':
+                    armatura = getattr(modificatore, "object", None)
+                    if armatura is not None and getattr(armatura, "type", None) == 'ARMATURE':
+                        return armatura
+            # 2 · Parent diretto di tipo ARMATURE.
+            genitore = getattr(attivo, "parent", None)
+            if genitore is not None and getattr(genitore, "type", None) == 'ARMATURE':
+                return genitore
+        except (AttributeError, ReferenceError, RuntimeError):
+            # Oggetto attivo non piu' leggibile: si prova con i selezionati.
+            pass
+    # 3 · Qualsiasi armatura tra gli oggetti selezionati.
+    try:
+        selezionati = getattr(context, "selected_objects", ()) or ()
+    except (AttributeError, ReferenceError, RuntimeError):
+        return None
+    for oggetto in selezionati:
+        try:
+            if getattr(oggetto, "type", None) == 'ARMATURE':
+                return oggetto
+        except (AttributeError, ReferenceError, RuntimeError):
+            # Singolo oggetto non valido nell'insieme dei selezionati: si salta.
+            continue
+    return None
+
+
 class CTRLDEF_OT_rig_score(Operator):
     bl_idname = "ctrl_def.rig_score"
     bl_label = tr("op.rig_score")
@@ -1418,8 +1464,9 @@ class CTRLDEF_OT_rig_score(Operator):
         return tr("tip.op.rig_score")
 
     def execute(self, context):
-        arm = context.active_object
-        if arm is None or arm.type != "ARMATURE":
+        # Con una mesh armaturata attiva si risolve l'armatura come nel pannello.
+        arm = _resolve_armature(context)
+        if arm is None:
             self.report({'ERROR'}, tr("msg.no_armature"))
             return {'CANCELLED'}
         report, punteggio = _rig_health_score(arm, context)
@@ -3289,22 +3336,32 @@ class CTRLDEF_OT_restore_rigger(Operator):
 # ===========================================================================
 
 def _nd_validate_map(arm_obj, rename_map):
+    """Mappa di rinomina valida: chiavi e valori stringa, bone esistenti.
+
+    Accetta solo un dict non vuoto con chiavi e valori stringa non vuote che
+    indicano bone esistenti, senza destinazioni duplicate ne' gia' occupate da
+    bone o controller estranei alla mappa. I cicli (es. swap A->B, B->A) restano
+    leciti: i valori sono unici e _nd_rename_bones passa da nomi temporanei,
+    quindi nessun bone viene sovrascritto. In sola lettura: non tocca il registro.
+    """
     if not isinstance(rename_map, dict) or not rename_map:
         return False
-    arm_data = arm_obj.data
-    existing = set(b.name for b in arm_data.bones)
-    try:
-        reg = _read_registry(arm_obj)
-    except Exception:
-        return False
-    reg_keys = set(reg.keys()) if isinstance(reg, dict) else set()
-    olds = set(rename_map.keys())
-    news = list(rename_map.values())
+    # Controllo stretto dei tipi PRIMA di qualunque accesso all'armatura.
     for old, new in rename_map.items():
         if not isinstance(old, str) or not isinstance(new, str):
             return False
         if not old or not new:
             return False
+    try:
+        existing = set(b.name for b in arm_obj.data.bones)
+        reg = _read_registry(arm_obj)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        # Armatura o registro non leggibili: mappa da rifiutare senza modifiche.
+        return False
+    reg_keys = set(reg.keys()) if isinstance(reg, dict) else set()
+    olds = set(rename_map.keys())
+    news = list(rename_map.values())
+    for old in olds:
         if old not in existing:
             return False
     if len(set(news)) != len(news):
@@ -3399,40 +3456,48 @@ def _nd_update_parents(arm_obj, rename_map, captured_parents=None):
         return None
 
     # Riparazione in edit mode: Bone.parent e' read-only in object/pose mode.
+    # La modalita' di partenza viene ripristinata comunque nel finally.
+    modo_iniziale = getattr(arm_obj, "mode", None) or 'POSE'
     try:
-        _ensure_armature_mode(bpy.context, arm_obj, 'EDIT')
-    except Exception:
-        return None
-    try:
-        ebones = arm_obj.data.edit_bones
-        # Ripristina parent persi a partire dalla mappa catturata.
-        if isinstance(captured_parents, dict):
-            for old_child, old_parent in captured_parents.items():
-                new_child_name = rename_map.get(old_child, old_child)
-                if new_child_name not in ebones:
-                    continue
-                echild = ebones[new_child_name]
-                if echild.parent is not None:
-                    continue
-                if old_parent is None:
-                    echild.parent = None
-                    continue
-                new_parent_name = rename_map.get(old_parent, old_parent)
-                if new_parent_name in ebones:
-                    echild.parent = ebones[new_parent_name]
-        # Ripara parent stale (nome vecchio) residui.
-        for ename in list(ebones.keys()):
-            ebone = ebones[ename]
-            if ebone.parent is not None and ebone.parent.name in rename_map:
-                new_parent_name = rename_map[ebone.parent.name]
-                if new_parent_name in ebones:
-                    ebone.parent = ebones[new_parent_name]
-    except Exception:
-        pass
-    try:
-        _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
-    except Exception:
-        pass
+        try:
+            _ensure_armature_mode(bpy.context, arm_obj, 'EDIT')
+        except (AttributeError, RuntimeError, TypeError):
+            # Nessun cambio di modalita' possibile: nessuna riparazione.
+            return None
+        try:
+            ebones = arm_obj.data.edit_bones
+            # Ripristina parent persi a partire dalla mappa catturata.
+            if isinstance(captured_parents, dict):
+                for old_child, old_parent in captured_parents.items():
+                    new_child_name = rename_map.get(old_child, old_child)
+                    if new_child_name not in ebones:
+                        continue
+                    echild = ebones[new_child_name]
+                    if echild.parent is not None:
+                        continue
+                    if old_parent is None:
+                        echild.parent = None
+                        continue
+                    new_parent_name = rename_map.get(old_parent, old_parent)
+                    if new_parent_name in ebones:
+                        echild.parent = ebones[new_parent_name]
+            # Ripara parent stale (nome vecchio) residui.
+            for ename in list(ebones.keys()):
+                ebone = ebones[ename]
+                if ebone.parent is not None and ebone.parent.name in rename_map:
+                    new_parent_name = rename_map[ebone.parent.name]
+                    if new_parent_name in ebones:
+                        ebone.parent = ebones[new_parent_name]
+        except (AttributeError, RuntimeError, TypeError, KeyError):
+            # Edit bones non coerenti (rinomina parziale): si prosegue, il
+            # chiamante ripristina comunque lo stato finale.
+            pass
+    finally:
+        # Ripristino garantito della modalita' trovata all'ingresso.
+        try:
+            _ensure_armature_mode(bpy.context, arm_obj, modo_iniziale)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
     return None
 
 
@@ -3460,49 +3525,71 @@ def _nd_preserve_shapes(arm_obj, rename_map, captured=None):
 
 
 def naming_doctor(arm_obj, rename_map):
+    """Rinomina sicura dei bone con registro, vincoli e shape allineati.
+
+    Con una mappa vuota non fa nulla; con una mappa non valida (tipi errati,
+    bone inesistenti, destinazioni duplicate o occupate) esce in CANCELLED
+    SENZA toccare registro, vincoli o bone. La modalita' dell'armatura trovata
+    all'ingresso viene ripristinata comunque, anche in caso di errore.
+    """
     if arm_obj is None or getattr(arm_obj, "type", None) != "ARMATURE":
         return {'CANCELLED'}
+    # Una mappa vuota non e' un errore: non c'e' nulla da rinominare.
+    if isinstance(rename_map, dict) and not rename_map:
+        return {'FINISHED'}
+    # Validazione stretta PRIMA di qualunque scrittura su registry o bone.
     if not _nd_validate_map(arm_obj, rename_map):
         return {'CANCELLED'}
+    # Modalita' di partenza da ripristinare comunque a fine operazione.
+    modo_iniziale = getattr(arm_obj, "mode", None) or 'OBJECT'
+    esito = {'CANCELLED'}
     try:
-        _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
-    except Exception:
-        return {'CANCELLED'}
-    shapes = _nd_preserve_shapes(arm_obj, rename_map)
-    # Cattura i parent prima della rinomina per poterli ripristinare.
-    parents_before = {}
-    try:
-        for b in arm_obj.data.bones:
-            parents_before[b.name] = (b.parent.name if b.parent is not None else None)
-    except Exception:
+        try:
+            _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+        except (AttributeError, RuntimeError, TypeError):
+            return {'CANCELLED'}
+        shapes = _nd_preserve_shapes(arm_obj, rename_map)
+        # Cattura i parent prima della rinomina per poterli ripristinare.
         parents_before = {}
-    try:
-        _ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
-        _nd_rename_bones(arm_obj, rename_map)
-    except Exception:
-        return {'CANCELLED'}
-    try:
-        _nd_update_registry(arm_obj, rename_map)
-    except Exception:
-        return {'CANCELLED'}
-    try:
-        _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
-        _nd_update_constraints(arm_obj, rename_map)
-    except Exception:
-        return {'CANCELLED'}
-    # I constraint puntano ai bone per nome: l'update del depsgraph deve
-    # avvenire solo DOPO aver riallineato i subtarget, altrimenti la
-    # valutazione usa i nomi vecchi e fallisce sulla relazione.
-    bpy.context.view_layer.update()
-    try:
-        _nd_update_parents(arm_obj, rename_map, parents_before)
-    except Exception:
-        return {'CANCELLED'}
-    try:
-        _nd_preserve_shapes(arm_obj, rename_map, shapes)
-    except Exception:
-        return {'CANCELLED'}
-    return {'FINISHED'}
+        try:
+            for b in arm_obj.data.bones:
+                parents_before[b.name] = (b.parent.name if b.parent is not None else None)
+        except (AttributeError, ReferenceError, RuntimeError):
+            parents_before = {}
+        try:
+            _ensure_armature_mode(bpy.context, arm_obj, 'OBJECT')
+            _nd_rename_bones(arm_obj, rename_map)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return {'CANCELLED'}
+        try:
+            _nd_update_registry(arm_obj, rename_map)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return {'CANCELLED'}
+        try:
+            _ensure_armature_mode(bpy.context, arm_obj, 'POSE')
+            _nd_update_constraints(arm_obj, rename_map)
+        except (AttributeError, RuntimeError, TypeError):
+            return {'CANCELLED'}
+        # I constraint puntano ai bone per nome: l'update del depsgraph deve
+        # avvenire solo DOPO aver riallineato i subtarget, altrimenti la
+        # valutazione usa i nomi vecchi e fallisce sulla relazione.
+        bpy.context.view_layer.update()
+        try:
+            _nd_update_parents(arm_obj, rename_map, parents_before)
+        except (AttributeError, RuntimeError, TypeError, KeyError):
+            return {'CANCELLED'}
+        try:
+            _nd_preserve_shapes(arm_obj, rename_map, shapes)
+        except (AttributeError, RuntimeError, TypeError):
+            return {'CANCELLED'}
+        esito = {'FINISHED'}
+        return esito
+    finally:
+        # Ripristino garantito: la modalita' non resta appesa a POSE/OBJECT.
+        try:
+            _ensure_armature_mode(bpy.context, arm_obj, modo_iniziale)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
 
 
 class CTRLDEF_OT_naming_doctor(Operator):
@@ -3519,8 +3606,9 @@ class CTRLDEF_OT_naming_doctor(Operator):
         return tr("tip.op.naming_doctor")
 
     def execute(self, context):
-        arm = context.active_object
-        if arm is None or arm.type != "ARMATURE":
+        # Con una mesh armaturata attiva si risolve l'armatura come nel pannello.
+        arm = _resolve_armature(context)
+        if arm is None:
             self.report({'ERROR'}, tr("msg.no_armature"))
             return {'CANCELLED'}
         try:
@@ -3531,6 +3619,9 @@ class CTRLDEF_OT_naming_doctor(Operator):
         if not isinstance(rename_map, dict):
             self.report({'ERROR'}, tr("msg.invalid_rename_map"))
             return {'CANCELLED'}
+        if not rename_map:
+            self.report({'INFO'}, "nessun rename da applicare")
+            return {'FINISHED'}
         res = naming_doctor(arm, rename_map)
         if res == {'FINISHED'}:
             self.report({'INFO'}, tr("op.naming_doctor"))

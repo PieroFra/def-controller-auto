@@ -5,6 +5,7 @@ import bpy
 from bpy.types import Panel
 
 from .ctrl_def_i18n import tr
+from .ctrl_def_operators import _resolve_armature
 from .ctrl_def_registry import _read_registry
 from .ctrl_def_shapes import _bonewidget_available, _is_def_bone
 
@@ -168,7 +169,11 @@ def _parse_rig_score_summary(raw):
         voto = re.search(r"(\d+)\s*/\s*(\d+)", testo_upper)
     if voto is None:
         return None
-    punti, totale = int(voto.group(1)), int(voto.group(2))
+    # Conversione difensiva: un voto non numerico non deve rompere il draw.
+    try:
+        punti, totale = int(voto.group(1)), int(voto.group(2))
+    except (TypeError, ValueError):
+        return None
     if totale <= 0 or punti < 0 or punti > totale:
         return None
     # Coppie (categoria, punteggio) nell'ordine canonico del report.
@@ -247,6 +252,10 @@ def _draw_guide(layout):
             corpo.label(text=tr("guide.%d" % passo))
 
 
+# _resolve_armature e' importato da ctrl_def_operators: unica implementazione
+# condivisa, nessun duplicato tra UI e operatori (vedi import in testa al file).
+
+
 class CTRLDEF_PT_panel(Panel):
     bl_label = tr("panel.label")
     bl_idname = "CTRLDEF_PT_panel"
@@ -257,9 +266,7 @@ class CTRLDEF_PT_panel(Panel):
     def draw(self, context):
         layout = self.layout
         stg = context.scene.ctrl_def_settings
-        arm = context.active_object
-        if arm is not None and arm.type != "ARMATURE":
-            arm = None
+        arm = _resolve_armature(context)
         # 1 · Setup: stato, preset, prefissi e mirror (aperta)
         corpo = _section(layout, "sec.setup")
         if corpo is not None:
