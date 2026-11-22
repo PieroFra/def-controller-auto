@@ -85,6 +85,36 @@ def _build_chain(arm_data):
     _add_bone(arm_data, "DEF_hand.L", (0.0, 0.0, 2.0), (0.0, 0.0, 2.2), "DEF_forearm.L")
 
 
+def _funzioni_selezione_posa():
+    """(setter, getter) dell'addon per la selezione dei pose bone.
+
+    Il package non riesporta i due helper in __init__: si leggono dal modulo
+    ctrl_def_operators gia' caricato, cosi' il test scrive e legge lo stato
+    con la stessa sorgente di _selected_ctrl_chains invece di toccare a mano
+    la copia Bone (che su Blender 5.2 lascia pbone.select a False).
+    """
+    mod = _addon_module()
+    nome_mod = mod.__package__ + ".ctrl_def_mods.ctrl_def_operators"
+    operatori = sys.modules.get(nome_mod)
+    if operatori is None:
+        operatori = importlib.import_module(nome_mod)
+    return operatori._set_pose_bone_selected, operatori._pose_bone_selected
+
+
+def _posa_bone_select(pbone, stato=True):
+    """Imposta la selezione con la funzione dell'addon.
+
+    L'alias RNA PoseBone.select non esiste piu': si delega a
+    _set_pose_bone_selected, che scrive pbone.select e la copia Bone quando
+    esistono. Scrivere solo su bone.select lasciava la lettura dell'addon su
+    pbone.select a False, quindi _selected_ctrl_chains leggeva [].
+    """
+    if pbone is None:
+        return
+    setter, _ = _funzioni_selezione_posa()
+    setter(pbone, bool(stato))
+
+
 def _seleziona_posa(arm_obj, nomi=None, stato=True):
     """Imposta la selezione dei pose bone con fallback tra versioni Blender.
 
@@ -98,12 +128,7 @@ def _seleziona_posa(arm_obj, nomi=None, stato=True):
     else:
         bersagli = [arm_obj.pose.bones[nm] for nm in nomi]
     for pbone in bersagli:
-        if hasattr(pbone, "select"):
-            pbone.select = stato
-        # Da Blender 5.0 il Bone dell'armatura non espone piu' "select":
-        # lo stato si copia solo se la proprieta' esiste ancora.
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = stato
+        _posa_bone_select(pbone, stato)
     bpy.context.view_layer.update()
 
 
@@ -852,11 +877,12 @@ def test_bind_actd_rotazione():
     for nm in ("arm.L", "forearm.L", "hand.L"):
         assert nm in registro_ik, f"Controller {nm} non registrato prima di add_ik: {sorted(registro_ik)}"
     _seleziona_posa(arm_obj, ("arm.L", "forearm.L", "hand.L"), True)
-    # Stessa sorgente di lettura dell'operatore: pose bone selezionati.
+    # Stessa sorgente di lettura dell'operatore: _pose_bone_selected dell'addon.
+    _, legge_selezione = _funzioni_selezione_posa()
     for nm in ("arm.L", "forearm.L", "hand.L"):
         pbone = arm_obj.pose.bones[nm]
-        sel = pbone.select if hasattr(pbone, "select") else getattr(pbone.bone, "select", False)
-        assert sel is True, f"Pose bone {nm} non selezionato dopo _seleziona_posa"
+        assert legge_selezione(pbone) is True, \
+            f"Pose bone {nm} non selezionato dopo _seleziona_posa"
     # Con il default (ik_chain_length=2) una catena di 3 viene scartata:
     # _selected_ctrl_chains la ignora e add_ik segnala WARNING (CANCELLED).
     stg_ik = bpy.context.scene.ctrl_def_settings
@@ -1544,7 +1570,7 @@ def test_handoff_animatore():
         pb = arm_obj.pose.bones.get(b.name)
         assert pb is not None, f"Pose bone {b.name} assente"
         try:
-            pb.select = True
+            _posa_bone_select(pb, True)
         except Exception as exc:
             raise AssertionError(f"{b.name} non selezionabile: {exc}")
 
@@ -1688,6 +1714,11 @@ def _frames_animazione(dati_animazione):
     if dati_animazione is None or getattr(dati_animazione, "action", None) is None:
         return fotogrammi
     azione = dati_animazione.action
+    # Blender 4.2 - 4.x: azione legacy, le curve stanno direttamente su
+    # action.fcurves (le azioni layered arrivano con le Blender 5.x).
+    for fcurve in getattr(azione, "fcurves", []):
+        for punto in getattr(fcurve, "keyframe_points", []):
+            fotogrammi.add(int(round(punto.co[0])))
     for layer in getattr(azione, "layers", []):
         for strip in getattr(layer, "strips", []):
             for channelbag in getattr(strip, "channelbags", []):
@@ -1853,19 +1884,11 @@ def test_snap_preserva_constraint_roll_ordine():
     mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     bpy.context.view_layer.update()
     for nm in ("arm.L", "forearm.L", "hand.L"):
-        pbone = arm_obj.pose.bones.get(nm)
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+        _posa_bone_select(arm_obj.pose.bones.get(nm), True)
     stg.ik_chain_length = 3
     mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     for nm in ("arm.L", "forearm.L", "hand.L"):
-        pbone = arm_obj.pose.bones.get(nm)
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+        _posa_bone_select(arm_obj.pose.bones.get(nm), True)
     catene_lette = mod._selected_ctrl_chains(arm_obj)
     assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
         f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
@@ -1927,19 +1950,11 @@ def test_bake_frame_range():
     mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     bpy.context.view_layer.update()
     for nm in ("arm.L", "forearm.L", "hand.L"):
-        pbone = arm_obj.pose.bones.get(nm)
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+        _posa_bone_select(arm_obj.pose.bones.get(nm), True)
     stg.ik_chain_length = 3
     mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     for nm in ("arm.L", "forearm.L", "hand.L"):
-        pbone = arm_obj.pose.bones.get(nm)
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+        _posa_bone_select(arm_obj.pose.bones.get(nm), True)
     catene_lette = mod._selected_ctrl_chains(arm_obj)
     assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
         f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
@@ -2007,19 +2022,11 @@ def test_bake_doppia_esecuzione():
     mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     bpy.context.view_layer.update()
     for nm in ("arm.L", "forearm.L", "hand.L"):
-        pbone = arm_obj.pose.bones.get(nm)
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+        _posa_bone_select(arm_obj.pose.bones.get(nm), True)
     stg.ik_chain_length = 3
     mod._ensure_armature_mode(bpy.context, arm_obj, 'POSE')
     for nm in ("arm.L", "forearm.L", "hand.L"):
-        pbone = arm_obj.pose.bones.get(nm)
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        if hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+        _posa_bone_select(arm_obj.pose.bones.get(nm), True)
     catene_lette = mod._selected_ctrl_chains(arm_obj)
     assert catene_lette == [["arm.L", "forearm.L", "hand.L"]], \
         f"_selected_ctrl_chains ha letto {catene_lette} invece della catena di 3"
@@ -4108,10 +4115,10 @@ def test_add_ik_pose_mode_and_single_tip():
         f"add_ik ha lasciato l'armatura in {arm_obj.mode} invece di POSE"
     pb_ik = arm_obj.pose.bones.get("IK_hand.L")
     assert pb_ik is not None, "Pose bone IK_hand.L assente dopo add_ik"
-    selezionato = getattr(pb_ik, "select", None)
-    if selezionato is None:
-        selezionato = pb_ik.bone.select
-    assert selezionato, "Il target IK_hand.L non e' selezionato dopo add_ik"
+    # Lettura con la stessa funzione dell'addon (pose bone prima, Bone dopo).
+    _, legge_selezione = _funzioni_selezione_posa()
+    assert legge_selezione(pb_ik), \
+        "Il target IK_hand.L non e' selezionato dopo add_ik"
 
 
 def test_rig_score_ui_summary():
@@ -4176,7 +4183,10 @@ def test_rig_score_ui_summary():
         "Stringa corrotta accettata dal parser"
 
     # 4) Il pannello disegna il box senza errori con l'armatura attiva.
-    registro = {"labels": [], "props": [], "operators": [], "panels": []}
+    # Ogni etichetta porta con se' la sezione che la contiene: cosi' il test
+    # verifica la POSIZIONE del box (Setup aperta), non solo la presenza.
+    registro = {"labels": [], "props": [], "operators": [], "panels": [],
+                "etichette_sezione": []}
 
     class _SegnapostoOperatoreUI:
         """Ritorno di operator(): serve solo l'attributo url in _draw_widget_box."""
@@ -4184,11 +4194,13 @@ def test_rig_score_ui_summary():
     class _FakeLayoutUI:
         """UILayout finto che registra le chiamate del draw (headless)."""
 
-        def __init__(self):
+        def __init__(self, sezione=None):
             self.scale_y = 1.0
+            self.sezione = sezione
 
         def label(self, text="", icon="NONE"):
             registro["labels"].append(text)
+            registro["etichette_sezione"].append((self.sezione, text))
 
         def prop(self, data, name, text="", slider=False):
             registro["props"].append(name)
@@ -4198,17 +4210,17 @@ def test_rig_score_ui_summary():
             return _SegnapostoOperatoreUI()
 
         def row(self, align=False):
-            return _FakeLayoutUI()
+            return _FakeLayoutUI(self.sezione)
 
         def column(self, align=False):
-            return _FakeLayoutUI()
+            return _FakeLayoutUI(self.sezione)
 
         def box(self):
-            return _FakeLayoutUI()
+            return _FakeLayoutUI(self.sezione)
 
         def panel(self, chiave, default_closed=False):
             registro["panels"].append(chiave)
-            return (_FakeLayoutUI(), _FakeLayoutUI())
+            return (_FakeLayoutUI(chiave), _FakeLayoutUI(chiave))
 
     finto = type("FintoPanelUI", (), {"layout": _FakeLayoutUI()})()
     mod.CTRLDEF_PT_panel.draw(finto, bpy.context)
@@ -4224,11 +4236,31 @@ def test_rig_score_ui_summary():
     atteso = "Rig Score: %s/30" % voto.group(1)
     assert atteso in registro["labels"], \
         f"Riga voto non disegnata: {registro['labels']!r}"
-    # Le categorie del report compaiono nelle etichette del box.
+    # Il box vive nella sezione 1 Setup (aperta di default) e li' appare una
+    # sola volta: niente doppione in Avanzate, che resta chiusa di default.
+    occorrenze = [(sez, testo) for sez, testo in registro["etichette_sezione"]
+                  if testo == atteso]
+    assert len(occorrenze) == 1, \
+        f"Riga voto disegnata {len(occorrenze)} volte (attesa 1): {occorrenze!r}"
+    assert occorrenze[0][0] == "sec.setup", \
+        f"Box Rig Score fuori dalla sezione Setup: {occorrenze[0][0]!r}"
+    assert not any(sez == "sec.advanced" and testo == atteso
+                   for sez, testo in registro["etichette_sezione"]), \
+        "Box Rig Score ancora duplicato nella sezione Avanzate"
+    # Le categorie del report compaiono nelle etichette del box, in Setup.
     for nome, punteggio_cat in riepilogo["categories"]:
         etichetta = "%s %s" % (nome, punteggio_cat)
         assert etichetta in registro["labels"], \
             f"Categoria non disegnata: {etichetta!r}"
+        assert ("sec.setup", etichetta) in registro["etichette_sezione"], \
+            f"Categoria fuori dal box Setup: {etichetta!r}"
+
+    # Il pulsante Rig Score resta in Avanzate insieme al campo mappa JSON.
+    assert "ctrl_def.rig_score" in registro["operators"], \
+        "Pulsante Rig Score sparito dalla sidebar"
+    # L'etichetta della mappa e' quella chiara dell'i18n, non vuota.
+    assert mod.tr("panel.rename_map_json"), \
+        "Etichetta del campo mappa JSON vuota"
 
 
 def test_rig_score_e_naming_doctor_su_mesh_attiva():

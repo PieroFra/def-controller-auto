@@ -218,20 +218,29 @@ def _draw_rig_score_box(layout, riepilogo):
         box.row(align=True).label(text="FAIL %s" % dettaglio, icon='ERROR')
 
 
+def _draw_rig_score_from_arm(layout, arm):
+    """Box dell'ultimo Rig Score letto dall'armatura attiva.
+
+    Il box vive nella sezione Setup (sempre aperta), non in Avanzate: dopo
+    aver premuto Rig Score il voto e le categorie devono essere visibili
+    senza espandere nulla. Un report mancante o rotto viene ignorato.
+    """
+    if arm is None or getattr(arm, "type", None) != 'ARMATURE':
+        return
+    try:
+        grezzo = arm.get("_ctrl_def_last_rig_score")
+    except (AttributeError, TypeError):
+        grezzo = None
+    riepilogo = _parse_rig_score_summary(grezzo)
+    if riepilogo is not None:
+        _draw_rig_score_box(layout, riepilogo)
+
+
 def _draw_advanced_actions(layout, arm=None, stg=None):
     """Diagnostica, manifest, rimappatura e pulizia su righe compatte."""
     row = layout.row(align=True)
     row.operator("ctrl_def.diagnose", text=tr("op.diagnose"), icon='VIEWZOOM')
     row.operator("ctrl_def.rig_score", text=tr("op.rig_score"), icon='SOLO_ON')
-    # Ultimo Rig Score letto dall'armatura attiva: ignorato se manca o e' rotto.
-    if arm is not None and getattr(arm, "type", None) == 'ARMATURE':
-        try:
-            grezzo = arm.get("_ctrl_def_last_rig_score")
-        except (AttributeError, TypeError):
-            grezzo = None
-        riepilogo = _parse_rig_score_summary(grezzo)
-        if riepilogo is not None:
-            _draw_rig_score_box(layout, riepilogo)
     row = layout.row(align=True)
     row.operator("ctrl_def.manifest", text=tr("op.manifest"), icon='FILE_TEXT')
     row.operator("ctrl_def.manifest_diff", text=tr("op.manifest_diff"),
@@ -278,6 +287,9 @@ class CTRLDEF_PT_panel(Panel):
         if corpo is not None:
             if arm is not None:
                 _draw_stats_box(corpo, arm, stg)
+            # Box Rig Score accanto allo stato: visibile subito dopo il click
+            # sul pulsante, senza aprire la sezione Avanzate.
+            _draw_rig_score_from_arm(corpo, arm)
             _draw_preset_box(corpo, stg)
             _draw_settings(corpo, stg)
         # 2 · Controller: aspetto, poi le due azioni principali (aperta)
