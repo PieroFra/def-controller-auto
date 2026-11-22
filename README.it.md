@@ -1,6 +1,6 @@
 **[🇬🇧 English](README.md) | 🇮🇹 Italiano**
 
-# CTRL_DEF — Auto Rig Layers (DEF / MCH / ORG / CTRL)
+# CTRL_DEF: Auto Rig Layers (DEF / MCH / ORG / CTRL)
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
@@ -10,17 +10,17 @@
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`) — **Auto Rig Layers** (`v0.5.2`): pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycle.
+Genera in un click bone controller tracciati, colorati e dotati di **custom shape condivise** a partire dalla catena di deformazione (`DEF_`): **Auto Rig Layers** (`v0.5.2`). Pipeline di rigging multi-livello (`DEF -> ORG -> MCH -> CTRL` e varianti) con livelli intermedi `ORG`/`MCH` automatici e auto-nascosti, target IK allineati a `+Y` mondo con pole automatico, package modulare `ctrl_def_mods\` e sinergia 1-click con **A.C.T.D.** (Auto Copy Transforms DEF), con zero Dependency Cycle.
 
 | | |
 |---|---|
-| **Compatibilità** | **Blender 4.2 LTS — 5.2+** |
+| **Compatibilità** | **Blender 4.2 LTS - 5.2+** |
 | **Categoria** | **Rigging** |
 | **Versione** | **0.5.2** |
 | **Autore** | **Pierfrancesco Diodato** |
 | **Tipo** | Add-on (ZIP installabile o cartella) |
 | **Licenza** | GPL-3.0-or-later |
-| **Pagina ufficiale** | [Blender Extensions — ctrl-def](https://extensions.blender.org/add-ons/ctrl-def/) |
+| **Pagina ufficiale** | [Blender Extensions: ctrl-def](https://extensions.blender.org/add-ons/ctrl-def/) |
 
 ---
 
@@ -35,14 +35,14 @@ Genera in un click bone controller tracciati, colorati e dotati di **custom shap
 
 ---
 
-## ⚡ Quick Start (in meno di 60 secondi — 4 passaggi)
+## ⚡ Quick Start (in meno di 60 secondi, 4 passaggi)
 
 1. Seleziona l'armatura, entra in **Edit Mode** (`Tab`) e seleziona i bone con prefisso `DEF_`.
 2. Apri la Sidebar (`N`) → scheda **DEF Ctrl** e scegli un preset (es. *Arto Bipede (Cubo)*) o personalizza forma/colore/scala.
 3. Clicca **Genera Controller** (`ctrl_def.generate`): vengono creati i controller puliti (`hand.L`) in catena FK nella Bone Collection `"CTRLS"`.
 4. Clicca **Vincola DEF ai CTRL (ACTD)** (`ctrl_def.bind_actd`): i bone `DEF_` copiano istantaneamente le trasformazioni dei controller in Pose Mode senza Dependency Cycle.
 
-> **Risultato:** ruoti `arm.L` in Pose Mode e `DEF_arm.L` lo segue in tempo reale — la mesh si deforma tramite i DEF, il controllo passa dai controller.
+> **Risultato:** ruoti `arm.L` in Pose Mode e `DEF_arm.L` lo segue in tempo reale: la mesh si deforma tramite i DEF, il controllo passa dai controller.
 
 ---
 
@@ -51,7 +51,7 @@ Genera in un click bone controller tracciati, colorati e dotati di **custom shap
 - **Remap animazione** (`v0.5.0`): `ctrl_def.remap` trasferisce la posa dei controller da un rig sorgente a un rig destinazione usando la mappa DEF->CTRL, equivalente gratuito al Remap a pagamento dei competitor, gate `module-b-g2` (suite 18/18).
 
 - **Naming pulito di default**: i controller si chiamano come i bone DEF senza prefisso (`DEF_hand.L` → `hand.L`, standard Blender/Rigify); con il campo *Prefisso Controller* si ottiene il naming classico (es. `CTRL_` → `CTRL_hand.L`).
-- **Custom shape condivise per tipo** (`v0.1.2`): le forme wireframe sono oggetti condivisi (`CTRL_DEF_SHAPE_CIRCLE`, `CTRL_DEF_SHAPE_CUBE`, `CTRL_DEF_SHAPE_SPHERE`, `CTRL_DEF_SHAPE_ARROW`, `CTRL_DEF_SHAPE_CROSS`) — una sola mesh per tipo, riutilizzata da tutti i controller.
+- **Custom shape condivise per tipo** (`v0.1.2`): le forme wireframe sono oggetti condivisi (`CTRL_DEF_SHAPE_CIRCLE`, `CTRL_DEF_SHAPE_CUBE`, `CTRL_DEF_SHAPE_SPHERE`, `CTRL_DEF_SHAPE_ARROW`, `CTRL_DEF_SHAPE_CROSS`): una sola mesh per tipo, riutilizzata da tutti i controller.
 - **Generazione istantanea**: controller identici per posizione, orientamento e roll ai rispettivi `DEF_`, con `use_deform = False` (non deformano la mesh).
 - **Gerarchia di default "Catena CTRL (FK)"**: ricrea l'albero FK tra i controller (`forearm.L` figlio di `arm.L`), rendendoli indipendenti dai DEF: **zero Dependency Cycle** con A.C.T.D., anche con parent `Root`.
 - **Bone Collection dedicata**: isola automaticamente tutti i controller nella collezione `"CTRLS"` (rinominata da `"CTRL"` in `v0.2.0`).
@@ -67,8 +67,8 @@ Genera in un click bone controller tracciati, colorati e dotati di **custom shap
 - **Diagnostica Pre-Flight** (`v0.2.0`): `ctrl_def.diagnose` rileva bone `DEF` di lunghezza nulla, controparti specchiate `.L`/`.R` mancanti (con mirror attivo), collisioni di nome con bone non-DEF e avvisa quando si genera con parent `"DEF"` insieme ad A.C.T.D. (rischio Dependency Cycle).
 - **Export JSON/CSV e Preset Utente** (`v0.2.0`): `ctrl_def.export_json` / `ctrl_def.export_csv` esportano il registro CTRL→DEF con i metadati del rig; `ctrl_def.save_preset` / `ctrl_def.load_preset` salvano e ricaricano le impostazioni del pannello su file `.json`.
 - **Package modulare** (`v0.2.0`): la fonte di verità è il package `ctrl_def_mods\`, assemblato nel monolite installabile da `scripts/build_monolith.py` (build step, mai modificato a mano).
-- **Interfaccia organizzata** (`v0.2.0`): il pannello è diviso in 3 sezioni collassabili — `1 · Setup`, `2 · Controller`, `3 · Avanzate` — più una **Guida** integrata (chiusa di default), tutte localizzate IT/EN incluse le intestazioni di sezione.
-- **Parentela flessibile**: `Catena CTRL (FK)` (default), `Bone genitore`, `Root`, `Nessuno (Libero)` e `DEF stesso` — quest'ultimo **solo se i DEF non copiano i CTRL**, perché genera un Dependency Cycle con A.C.T.D.
+- **Interfaccia organizzata** (`v0.2.0`): il pannello è diviso in 3 sezioni collassabili (`1 · Setup`, `2 · Controller`, `3 · Avanzate`) più una **Guida** integrata (chiusa di default), tutte localizzate IT/EN incluse le intestazioni di sezione.
+- **Parentela flessibile**: `Catena CTRL (FK)` (default), `Bone genitore`, `Root`, `Nessuno (Libero)` e `DEF stesso`; quest'ultimo **solo se i DEF non copiano i CTRL**, perché genera un Dependency Cycle con A.C.T.D.
 - **Vincolo DEF→CTRL in 1 click**: il pulsante **"Vincola DEF ai CTRL (ACTD)"** (`ctrl_def.bind_actd`) entra in Pose Mode, configura ed esegue automaticamente **A.C.T.D.** se installato (sorgente = controller, destinazione = `DEF_`); senza A.C.T.D. applica gli stessi constraint `COPY_TRANSFORMS` in modo nativo (fallback standalone) dal registro proprietario.
 - **Mirror L/R**: genera contemporaneamente la controparte specchiata (es. `.L` → `.R`), con preservazione dei separatori `_L`/`_R` nel mirror.
 - **Preset rapidi**: *Default*, *Arto Bipede*, *Root Controller*, *Faccia*.
@@ -96,10 +96,10 @@ Catena di esempio (braccio sinistro) con preset *Arto Bipede (Cubo)*:
 |---|---|---|---|
 | **Nomi** | `DEF_arm.L` → `DEF_forearm.L` → `DEF_hand.L` | `arm.L` → `forearm.L` → `hand.L` | `CTRL_arm.L` → `CTRL_forearm.L` → `CTRL_hand.L` |
 | **`use_deform`** | `True` | `False` | `False` |
-| **Bone Collection** | — (rig originale) | `CTRLS` | `CTRLS` |
-| **Custom shape** | — | `CTRL_DEF_SHAPE_CUBE` (condivisa) | `CTRL_DEF_SHAPE_CUBE` (condivisa) |
+| **Bone Collection** | n/d (rig originale) | `CTRLS` | `CTRLS` |
+| **Custom shape** | n/d | `CTRL_DEF_SHAPE_CUBE` (condivisa) | `CTRL_DEF_SHAPE_CUBE` (condivisa) |
 | **Gerarchia** | Catena deformazione | Catena FK (`forearm.L` figlio di `arm.L`) | Catena FK (`CTRL_forearm.L` figlio di `CTRL_arm.L`) |
-| **Dependency Cycle con A.C.T.D.** | — | **Nessuno** | **Nessuno** |
+| **Dependency Cycle con A.C.T.D.** | n/d | **Nessuno** | **Nessuno** |
 
 I controller copiano posizione, orientamento e roll dei corrispondenti `DEF_`, ma non deformano la mesh (`use_deform = False`) e vivono nella Bone Collection dedicata `"CTRLS"`.
 
@@ -174,7 +174,7 @@ Lo ZIP di release contiene tra i readme solo la versione inglese `README.md` (qu
 
 **In alternativa:** scarica direttamente [`ctrl_def-0.5.2.zip`](https://github.com/PieroFra/def-controller-auto/releases/download/v0.5.2/ctrl_def-0.5.2.zip) (con file `.sha256` di verifica) dalla [release v0.5.2](https://github.com/PieroFra/def-controller-auto/releases/tag/v0.5.2). L'installazione da **Blender Extensions** resta la via consigliata.
 
-**Pagina ufficiale su Blender Extensions:** <https://extensions.blender.org/add-ons/ctrl-def/> — l'estensione è approvata e installabile direttamente da Blender 4.2+: *Modifica > Preferenze > Ottieni estensioni*, cerca **"DEF Controller Auto"** e clicca *Installa*.
+**Pagina ufficiale su Blender Extensions:** <https://extensions.blender.org/add-ons/ctrl-def/>. L'estensione è approvata e installabile direttamente da Blender 4.2+: *Modifica > Preferenze > Ottieni estensioni*, cerca **"DEF Controller Auto"** e clicca *Installa*.
 
 **Installazione in Blender:** *Modifica > Preferenze > Componenti aggiuntivi > Installa da disco...*, seleziona lo ZIP (o la cartella estratta), attiva **DEF Controller Auto** e trova il pannello nella **Sidebar 3D (tasto `N`) → scheda "DEF Ctrl"**.
 
@@ -214,14 +214,14 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 
 ## 📋 Changelog
 
-### `v0.4.0` — Catena IK, Space Switching, Snap e Bake IK-FK
+### `v0.4.0`: Catena IK, Space Switching, Snap e Bake IK-FK
 - **Catena IK**: `ik_chain_length` (1-8) sulla catena di controller selezionata.
 - **Space switching**: `ik_target_space` (World / Local / Object) con `ctrl_def.set_ik_target_space`, compensazione a matrice per mantenere la posa invariata.
 - **Snap e Bake IK->FK**: `ctrl_def.snap_ik_to_fk` e `ctrl_def.bake_ik_to_fk` per riportare la posa IK sui controller FK, con bake su keyframe e rimozione del constraint.
 - **Pole da mesh**: `ik_pole_source` (BONE / MESH) con auto-fit della direzione del pole dai vertici della mesh.
 - Gate di verifica: `module-c-g1`.
 
-### `v0.3.0` — Auto Rig Layers (DEF / MCH / ORG / CTRL)
+### `v0.3.0`: Auto Rig Layers (DEF / MCH / ORG / CTRL)
 - **Pipeline di rigging multi-livello**: `DEF -> ORG -> MCH -> CTRL`, `DEF -> MCH -> CTRL`, `MCH -> ORG`, `ORG -> CTRL` e `Custom` (prima solo `DEF -> CTRL` diretta).
 - **Livelli intermedi automatici**: Bone Collection `MCH` e `ORG` create e nascoste automaticamente, con lock di Location/Rotation/Scale (`lock_mch_org`).
 - **Target IK a +Y mondo**: allineamento `ik_align_world_y = True` (`roll = 0.0`) in cima alla catena + pole target automatico (`ik_create_pole`) lungo il vettore di piega gomito/ginocchio.
@@ -229,7 +229,7 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 
 ### `v0.2.0`
 - **Package modulare**: la fonte di verità è il package `ctrl_def_mods\` (9 moduli) assemblato nel monolite installabile da `scripts/build_monolith.py`.
-- **Pannello ridisegnato**: 3 sezioni collassabili (`1 · Setup`, `2 · Controller`, `3 · Avanzate` — `3 · Advanced` in EN) più una `Guida` integrata in 5 passi.
+- **Pannello ridisegnato**: 3 sezioni collassabili (`1 · Setup`, `2 · Controller`, `3 · Avanzate`; `3 · Advanced` in EN) più una `Guida` integrata in 5 passi.
 - **Integrazione Bone Widget**: `ctrl_def.create_widget` delega la creazione dei widget all'estensione Bone Widget, con link diretto di installazione se assente.
 - **Target IK rapido**: `ctrl_def.add_ik` sulle catene selezionate di 2‑3 controller (`use_deform = False`, zero Dependency Cycle).
 - **Diagnostica Pre-Flight**: `ctrl_def.diagnose` (bone DEF di lunghezza nulla, specchiate `.L`/`.R` mancanti, collisioni di nome, avviso parent "DEF" con A.C.T.D.).
@@ -260,7 +260,7 @@ Tutti gli id operazione vivono nel namespace `ctrl_def.*` e sono raggiungibili a
 
 ## 📄 Licenza
 
-GPL-3.0-or-later — vedi il file [LICENSE](LICENSE).
+GPL-3.0-or-later, vedi il file [LICENSE](LICENSE).
 
 
 ---

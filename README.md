@@ -1,6 +1,6 @@
 **🇬🇧 English | [🇮🇹 Italiano](README.it.md)**
 
-# CTRL_DEF — Auto Rig Layers (DEF / MCH / ORG / CTRL)
+# CTRL_DEF: Auto Rig Layers (DEF / MCH / ORG / CTRL)
 
 [![Blender](https://img.shields.io/badge/Blender-4.2%20LTS%20%E2%80%94%205.2%2B-blueviolet)](https://www.blender.org)
 [![Category](https://img.shields.io/badge/Category-Rigging-orange)](https://extensions.blender.org/)
@@ -10,17 +10,17 @@
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/PieroFra/badge.svg)](https://hub.xerj.org/contributors/PieroFra)
 [![Downloads](https://img.shields.io/github/downloads/PieroFra/def-controller-auto/total?label=downloads)](https://github.com/PieroFra/def-controller-auto/releases)
 
-Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click — **Auto Rig Layers** (`v0.5.2`): multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF) — zero Dependency Cycles.
+Generate tracked, colored controller bones with **shared custom shapes** from the deformation chain (`DEF_`) in a single click: **Auto Rig Layers** (`v0.5.2`). multi-layer rigging pipelines (`DEF -> ORG -> MCH -> CTRL` and variants) with automatic, auto-hidden intermediate `ORG`/`MCH` layers, World `+Y`-aligned IK targets with automatic pole, a modular `ctrl_def_mods\` package and 1-click synergy with **A.C.T.D.** (Auto Copy Transforms DEF), with zero Dependency Cycles.
 
 | | |
 |---|---|
-| **Compatibility** | **Blender 4.2 LTS — 5.2+** |
+| **Compatibility** | **Blender 4.2 LTS to 5.2+** |
 | **Category** | **Rigging** |
 | **Version** | **0.5.2** |
 | **Author** | **Pierfrancesco Diodato** |
 | **Type** | Add-on (installable ZIP or folder) |
 | **License** | GPL-3.0-or-later |
-| **Official page** | [Blender Extensions — ctrl-def](https://extensions.blender.org/add-ons/ctrl-def/) |
+| **Official page** | [Blender Extensions: ctrl-def](https://extensions.blender.org/add-ons/ctrl-def/) |
 
 ---
 
@@ -35,28 +35,28 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 
 ---
 
-## ⚡ Quick Start (under 60 seconds — 4 steps)
+## ⚡ Quick Start (under 60 seconds, 4 steps)
 
 1. Select the armature, enter **Edit Mode** (`Tab`) and select the bones with the `DEF_` prefix.
 2. Open the Sidebar (`N`) → **DEF Ctrl** tab and pick a preset (e.g. *Biped Arm (Cube)*) or customize shape, color and scale.
 3. Click **Generate Controllers** (`ctrl_def.generate`): clean controllers (`hand.L`) are created in an FK chain inside the `"CTRLS"` Bone Collection.
 4. Click **Bind DEF to CTRL (ACTD)** (`ctrl_def.bind_actd`): the `DEF_` bones instantly copy the controller transforms in Pose Mode with no Dependency Cycle.
 
-> **Result:** rotate `arm.L` in Pose Mode and `DEF_arm.L` follows in real time — the mesh deforms through the DEF bones, control lives on the controllers.
+> **Result:** rotate `arm.L` in Pose Mode and `DEF_arm.L` follows in real time: the mesh deforms through the DEF bones, control lives on the controllers.
 
 ---
 
 ## 🚀 Key Features
 
 - **Clean naming by default**: controllers are named after the DEF bones without prefix (`DEF_hand.L` → `hand.L`, Blender/Rigify standard); the *Controller Prefix* field restores the classic naming (e.g. `CTRL_` → `CTRL_hand.L`).
-- **Shared custom shapes per type** (`v0.1.2`): wireframe shapes are shared objects (`CTRL_DEF_SHAPE_CIRCLE`, `CTRL_DEF_SHAPE_CUBE`, `CTRL_DEF_SHAPE_SPHERE`, `CTRL_DEF_SHAPE_ARROW`, `CTRL_DEF_SHAPE_CROSS`) — one mesh per type, reused by every controller.
+- **Shared custom shapes per type** (`v0.1.2`): wireframe shapes are shared objects (`CTRL_DEF_SHAPE_CIRCLE`, `CTRL_DEF_SHAPE_CUBE`, `CTRL_DEF_SHAPE_SPHERE`, `CTRL_DEF_SHAPE_ARROW`, `CTRL_DEF_SHAPE_CROSS`): one mesh per type, reused by every controller.
 - **Instant generation**: controllers match the position, orientation and roll of their `DEF_` bones, with `use_deform = False` (they do not deform the mesh).
 - **Default hierarchy "CTRL Chain (FK)"**: rebuilds the FK tree between controllers (`forearm.L` child of `arm.L`), keeping them independent from the DEF bones: **zero Dependency Cycles** with A.C.T.D., even with a `Root` parent.
 - **Dedicated Bone Collection**: every controller is automatically isolated in the `"CTRLS"` collection (renamed from `"CTRL"` in `v0.2.0`).
 - **Themed color palette**: quick assignment following the Blender theme (Red, Green, Blue).
 - **Optional Bone Widget integration** (`v0.2.0`): the custom shape widgets of the generated controllers are delegated to the **Bone Widget** extension through `ctrl_def.create_widget` (built-in library picker); when the extension is not installed the panel warns and offers a **direct link** to its page.
 - **Quick IK target** (`v0.2.0`): `ctrl_def.add_ik` adds an IK target (optional pole pointer, `use_deform = False`) on a selected chain of 2‑3 controllers, with zero Dependency Cycles with A.C.T.D.
-- **IK chain & space switching** (`v0.4.0`): `ik_chain_length` (1–8) sets how many controllers of the selected chain the IK constraint covers; `ik_target_space` (World / Local / Object) with `ctrl_def.set_ik_target_space` changes the IK target space with matrix compensation, keeping the pose unchanged; `ik_pole_source` (BONE / MESH) picks the pole direction from the chain bend vector or from the mesh vertices.
+- **IK chain & space switching** (`v0.4.0`): `ik_chain_length` (1-8) sets how many controllers of the selected chain the IK constraint covers; `ik_target_space` (World / Local / Object) with `ctrl_def.set_ik_target_space` changes the IK target space with matrix compensation, keeping the pose unchanged; `ik_pole_source` (BONE / MESH) picks the pole direction from the chain bend vector or from the mesh vertices.
 - **Remap animation** (`v0.5.0`): `ctrl_def.remap` transfers controller poses from a source rig to a target rig using the DEF->CTRL mapping, a free equivalent of the paid Remap module of competitors, gate `module-b-g2` (suite 18/18).
 - **Rig Health Score** (`v0.5.0`): `ctrl_def.rig_score` evaluates the rig with 30 checks in 5 categories and a synthetic score out of 30, gate `module-a-g5` (suite 17/17).
 - **Manifest + Diff** (`v0.5.0`): `ctrl_def.manifest` writes a structural JSON snapshot of the rig (registry, hierarchy, constraints, IK, deform) and `ctrl_def.manifest_diff` compares it against the current rig, warning about drift before you regenerate.
@@ -66,8 +66,8 @@ Generate tracked, colored controller bones with **shared custom shapes** from th
 - **Pre-Flight Diagnostics** (`v0.2.0`): `ctrl_def.diagnose` checks zero-length `DEF` bones, missing `.L`/`.R` mirrored counterparts (with mirror enabled), name collisions with non-DEF bones and warns when parenting to `"DEF"` together with A.C.T.D. (Dependency Cycle risk).
 - **JSON/CSV export & user presets** (`v0.2.0`): `ctrl_def.export_json` / `ctrl_def.export_csv` export the CTRL→DEF registry with rig metadata; `ctrl_def.save_preset` / `ctrl_def.load_preset` save and reload your panel settings as `.json` files.
 - **Modular package** (`v0.2.0`): the source of truth is the `ctrl_def_mods\` module package, assembled into the installable monolith by `scripts/build_monolith.py` (build step, never edited by hand).
-- **Organized interface** (`v0.2.0`): the panel is split into 3 collapsible sections — `1 · Setup`, `2 · Controller`, `3 · Avanzate/Advanced` — plus an integrated **Guide** (closed by default), all localized in IT/EN including the section titles.
-- **Flexible parenting**: `CTRL Chain (FK)` (default), `Parent Bone`, `Root`, `None (Free)` and `Same DEF` — the latter **only if the DEF bones do not copy the CTRL**, because it creates a Dependency Cycle with A.C.T.D.
+- **Organized interface** (`v0.2.0`): the panel is split into 3 collapsible sections (`1 · Setup`, `2 · Controller`, `3 · Avanzate/Advanced`) plus an integrated **Guide** (closed by default), all localized in IT/EN including the section titles.
+- **Flexible parenting**: `CTRL Chain (FK)` (default), `Parent Bone`, `Root`, `None (Free)` and `Same DEF`; the latter **only if the DEF bones do not copy the CTRL**, because it creates a Dependency Cycle with A.C.T.D.
 - **1-click DEF→CTRL constraint**: the **"Bind DEF to CTRL (ACTD)"** button (`ctrl_def.bind_actd`) switches to Pose Mode, configures and runs **A.C.T.D.** automatically when installed (source = controllers, destination = `DEF_`); without A.C.T.D. it applies the same `COPY_TRANSFORMS` constraints natively (standalone fallback) from the proprietary registry.
 - **L/R mirroring**: generates the mirrored counterpart at the same time (e.g. `.L` → `.R`), preserving the `_L`/`_R` separators.
 - **Quick presets**: *Default*, *Biped Arm*, *Root Controller*, *Face*.
@@ -95,10 +95,10 @@ Sample chain (left arm) with the *Biped Arm (Cube)* preset:
 |---|---|---|---|
 | **Names** | `DEF_arm.L` → `DEF_forearm.L` → `DEF_hand.L` | `arm.L` → `forearm.L` → `hand.L` | `CTRL_arm.L` → `CTRL_forearm.L` → `CTRL_hand.L` |
 | **`use_deform`** | `True` | `False` | `False` |
-| **Bone Collection** | — (original rig) | `CTRLS` | `CTRLS` |
-| **Custom shape** | — | `CTRL_DEF_SHAPE_CUBE` (shared) | `CTRL_DEF_SHAPE_CUBE` (shared) |
+| **Bone Collection** | n/a (original rig) | `CTRLS` | `CTRLS` |
+| **Custom shape** | n/a | `CTRL_DEF_SHAPE_CUBE` (shared) | `CTRL_DEF_SHAPE_CUBE` (shared) |
 | **Hierarchy** | Deform chain | FK chain (`forearm.L` child of `arm.L`) | FK chain (`CTRL_forearm.L` child of `CTRL_arm.L`) |
-| **Dependency Cycle with A.C.T.D.** | — | **None** | **None** |
+| **Dependency Cycle with A.C.T.D.** | n/a | **None** | **None** |
 
 Controllers copy position, orientation and roll from their `DEF_` bones, but they do not deform the mesh (`use_deform = False`) and live in the dedicated `"CTRLS"` Bone Collection.
 
@@ -173,7 +173,7 @@ The release ZIP contains the English `README.md` only (the Italian version lives
 
 **Alternatively:** download [`ctrl_def-0.5.2.zip`](https://github.com/PieroFra/def-controller-auto/releases/download/v0.5.2/ctrl_def-0.5.2.zip) (with its `.sha256` checksum file) from the [v0.5.2 Release](https://github.com/PieroFra/def-controller-auto/releases/tag/v0.5.2). Installing from **Blender Extensions** remains the recommended way.
 
-**Official page on Blender Extensions:** <https://extensions.blender.org/add-ons/ctrl-def/> — the extension is approved and installable directly from Blender 4.2+: *Edit > Preferences > Get Extensions*, search **"DEF Controller Auto"** and click *Install*.
+**Official page on Blender Extensions:** <https://extensions.blender.org/add-ons/ctrl-def/>. The extension is approved and installable directly from Blender 4.2+: *Edit > Preferences > Get Extensions*, search **"DEF Controller Auto"** and click *Install*.
 
 **Installing in Blender:** *Edit > Preferences > Add-ons > Install from Disk...*, select the ZIP (or the extracted folder), enable **DEF Controller Auto** and find the panel in the **3D Sidebar (`N` key) → "DEF Ctrl" tab**.
 
@@ -216,13 +216,13 @@ All operation ids live in the `ctrl_def.*` namespace and are also reachable via 
 
 ## 📋 Changelog
 
-### `v0.4.0` — IK Chain & Space Switching
-- **IK chain length**: `ik_chain_length` (1–8) on the selected controller chain.
+### `v0.4.0`: IK Chain & Space Switching
+- **IK chain length**: `ik_chain_length` (1-8) on the selected controller chain.
 - **Pole direction source**: `ik_pole_source` (BONE / MESH) picks the pole direction from the chain bend vector or from the mesh vertices.
 - **Space switching** (`v0.4.0`, Fase H **closed**, gate `space-h-g2`, suite 28/28): `ik_target_space` (World / Local / Object) with `ctrl_def.set_ik_target_space`, matrix compensation keeps the pose unchanged.
 - **Snap & Bake IK→FK**: `ctrl_def.snap_ik_to_fk` and `ctrl_def.bake_ik_to_fk` (gates `snap-f-g3` and `bake-g3`).
 
-### `v0.3.0` — Auto Rig Layers (DEF / MCH / ORG / CTRL)
+### `v0.3.0`: Auto Rig Layers (DEF / MCH / ORG / CTRL)
 - **Multi-Layer rigging pipeline**: `DEF -> ORG -> MCH -> CTRL`, `DEF -> MCH -> CTRL`, `MCH -> ORG`, `ORG -> CTRL` and `Custom` (previously only direct `DEF -> CTRL`).
 - **Automatic intermediate layers**: `MCH` and `ORG` Bone Collections created automatically and hidden, with Location/Rotation/Scale transform locks (`lock_mch_org`).
 - **World +Y IK target**: alignment `ik_align_world_y = True` (`roll = 0.0`) at the chain tip + automatic pole target (`ik_create_pole`) along the elbow/knee bend vector.
@@ -230,7 +230,7 @@ All operation ids live in the `ctrl_def.*` namespace and are also reachable via 
 
 ### `v0.2.0`
 - **Modular package**: source of truth split into the `ctrl_def_mods\` package (9 modules) assembled into the installable monolith by `scripts/build_monolith.py`.
-- **Panel redesigned**: 3 collapsible sections (`1 · Setup`, `2 · Controller`, `3 · Avanzate` — `3 · Advanced` in EN) plus an integrated `Guide` in 5 steps.
+- **Panel redesigned**: 3 collapsible sections (`1 · Setup`, `2 · Controller`, `3 · Avanzate`; `3 · Advanced` in EN) plus an integrated `Guide` in 5 steps.
 - **Bone Widget integration**: `ctrl_def.create_widget` delegates widget creation to the Bone Widget extension, with a direct install link when it is missing.
 - **Quick IK target**: `ctrl_def.add_ik` on selected 2‑3 controller chains (`use_deform = False`, zero Dependency Cycles).
 - **Pre-Flight Diagnostics**: `ctrl_def.diagnose` (zero-length DEF bones, missing mirrored `.L`/`.R`, name collisions, "DEF" parenting warning with A.C.T.D.).
@@ -261,7 +261,7 @@ All operation ids live in the `ctrl_def.*` namespace and are also reachable via 
 
 ## 📄 License
 
-GPL-3.0-or-later — see the [LICENSE](LICENSE) file.
+GPL-3.0-or-later. See the [LICENSE](LICENSE) file.
 
 
 ---
